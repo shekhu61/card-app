@@ -1,0 +1,93 @@
+/* Base Styling & Variables */
+:root {
+  --p-space-0: 0;
+  --p-space-400: 1rem;
+  --p-space-600: 1.5rem;
+  --p-color-border-secondary: #e1e3e5;
+  --p-border-width-025: 1px;
+  --primary-blue: #008060; /* Polaris Green-Blue */
+  --primary-blue-hover: #006e52;
+  --text-main: #202223;
+  --text-subdued: #6d7175;
+  --bg-white: #ffffff;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #f6f6f7;
+  padding: 2rem;
+  color: var(--text-main);
+}
+
+/* Layout Container */
+.Polaris-Page {
+  max-width: 1000px;
+  margin: 0 auto;
+  background: var(--bg-white);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.Polaris-Box {
+  padding-top: var(--pc-box-padding-block-start-xs);
+  padding-bottom: var(--pc-box-padding-block-end-xs);
+  padding-left: var(--p-space-400);
+  padding-right: var(--p-space-400);
+}
+
+/* Header Alignment */
+.Polaris-Page-Header__Row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+/* Typography */
+.Polaris-Header-Title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.Polaris-Text--subdued {
+  color: var(--text-subdued);
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.Polaris-Text--visuallyHidden {
+  display: none;
+}
+
+/* Primary Button Styling */
+.Polaris-Button {
+  background-color: var(--primary-blue);
+  color: white;
+  border: 1px solid transparent;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+}
+
+.Polaris-Button:hover {
+  background-color: var(--primary-blue-hover);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.Polaris-Button:active {
+  transform: translateY(1px);
+}
+
+/* Divider */
+.Polaris-Divider {
+  margin: 0;
+  border: 0;
+}
