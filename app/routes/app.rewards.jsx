@@ -12,35 +12,26 @@ import {
 } from "@shopify/polaris";
 import { useState } from "react";
 
-
-
-
 export default function RewardsEmployees() {
   const [loading, setLoading] = useState(false);
-  const [employees, setEmployees] = useState([]);
-  const [rewards, setRewards] = useState([]);
-  const [rewardsDetail, setRewardsDetail] = useState([]);
-  const [addPointsResult, setAddPointsResult] = useState(null);
-  const [employeePoints, setEmployeePoints] = useState(null);
 
-  
+  const [employee, setEmployee] = useState(null);
+  const [employeeRewards, setEmployeeRewards] = useState([]);
+  const [employeeAddedPoints, setEmployeeAddedPoints] = useState([]);
 
   /* ---------------- FETCH DATA ---------------- */
 
-  async function getEmployees() {
+  async function fetchRewardsData() {
     setLoading(true);
     try {
       const res = await fetch("/api/rewards-employees", { method: "POST" });
       const data = await res.json();
 
-     
-      setRewards(data.rewards || []);
-      setRewardsDetail(data.rewards_detail || []);
-      setAddPointsResult(data.addPointsResult || null);
-      setEmployeePoints(data.employeePoints || null);
-      
+      setEmployee(data.employee || null);
+      setEmployeeRewards(data.employeeRewards || []);
+      setEmployeeAddedPoints(data.employeeAddedPoints || []);
     } catch (err) {
-      console.error(err);
+      console.error("Fetch error:", err);
     } finally {
       setLoading(false);
     }
@@ -48,63 +39,84 @@ export default function RewardsEmployees() {
 
   /* ---------------- HELPERS ---------------- */
 
-  const statusBadge = (active) => (
-    <Badge tone={active ? "success" : "critical"}>
-      {active ? "Active" : "Inactive"}
+  const badge = (value) => (
+    <Badge tone={value ? "success" : "critical"}>
+      {value ? "Yes" : "No"}
     </Badge>
   );
 
-  /* ---------------- ROWS ---------------- */
+  const formatDate = (date) =>
+    date ? new Date(date).toLocaleString() : "—";
 
-  const employeeRows = employees.map((e) => [
-    `${e.firstName} ${e.lastName}`,
-    e.employeeNumber,
-    e.emailAddress,
-    e.position,
-    e.officeLocation,
-    statusBadge(e.isActive),
-  ]);
+  /* ---------------- EMPLOYEE ROW ---------------- */
 
-  const rewardRows = rewards.map((r) => [
+  const employeeRows = employee
+    ? [[
+        employee.employeeID,
+        employee.employeeNumber,
+        employee.firstName,
+        employee.lastName,
+        employee.emailAddress,
+        employee.position,
+        employee.officeLocation,
+        employee.companyID,
+        employee.providerStatus,
+        employee.jobLevel || "—",
+        employee.workerType || "—",
+        employee.managerEmail || "—",
+        badge(employee.isActive),
+        badge(employee.isRescind),
+        formatDate(employee.hireDate),
+        formatDate(employee.terminationDate),
+        employee.createdBy || "—",
+        formatDate(employee.createdDate),
+        employee.updatedBy || "—",
+        formatDate(employee.updatedDate),
+      ]]
+    : [];
+
+  /* ---------------- EMPLOYEE REWARDS ROWS ---------------- */
+
+  const rewardRows = employeeRewards.map((r) => [
+    r.employeeRewardPointID,
+    r.employeeID,
     r.employeeNumber,
-    r.pointsEarned,
+    formatDate(r.startDate),
+    formatDate(r.endDate),
+    formatDate(r.calculatedOn),
     r.regular,
     r.fillinMakeUp,
     r.cancellation,
     r.unexcusedAbsence,
-    statusBadge(r.isActive),
-  ]);
-
-  const rewardDetailRows = rewardsDetail.map((r) => [
-    r.employeeAddedPointsID,
-    r.employeeNumber,
-    r.pointsAdded,
+    r.pointsEarned,
+    r.companyID,
     r.notes || "—",
-    new Date(r.createdDate).toLocaleDateString(),
-    statusBadge(r.isActive),
+    badge(r.isActive),
+    formatDate(r.createdDate),
+    formatDate(r.updatedDate),
   ]);
 
-  const employeePointsRows = employeePoints
-    ? [[
-        employeePoints.employeeID,
-        employeePoints.employeeName,
-        employeePoints.availablePoints,
-        employeePoints.totalEarnedPoints,
-        employeePoints.redeemedPoints,
-        employeePoints.addedPoints,
-      ]]
-    : [];
+  /* ---------------- EMPLOYEE ADDED POINTS ROWS ---------------- */
+
+  const addedPointsRows = employeeAddedPoints.map((p) => [
+    p.employeeID,
+    formatDate(p.dateAdded),
+    p.rewardType,
+    formatDate(p.startDate),
+    formatDate(p.endDate),
+    p.pointsAdded,
+    p.notes || "—",
+  ]);
 
   return (
     <Page
       title="Rewards & Employees"
-      subtitle="Manage employee data, rewards and points"
+      subtitle="Complete employee, rewards & added points data"
       primaryAction={{
         content: "Fetch Latest Data",
-        onAction: getEmployees,
+        onAction: fetchRewardsData,
         loading,
       }}
-      className="rewardsPage"
     >
       {/* LOADING */}
       {loading && (
@@ -117,151 +129,74 @@ export default function RewardsEmployees() {
       )}
 
       <Layout gap="400">
-        {/* EMPLOYEES */}
+        {/* EMPLOYEE TABLE */}
         {employeeRows.length > 0 && (
           <Layout.Section>
             <Card>
               <BlockStack gap="300">
-                <Text variant="headingMd" className="sectionTitle">
-                  Employees
-                </Text>
+                <Text variant="headingMd">Employee (All Columns)</Text>
                 <DataTable
-                  columnContentTypes={["text", "text", "text", "text", "text", "text"]}
+                  columnContentTypes={[
+                    "numeric","text","text","text","text","text","text",
+                    "numeric","numeric","text","text","text",
+                    "text","text","text","text","text","text","text","text"
+                  ]}
                   headings={[
-                    "Name",
-                    "Employee No",
-                    "Email",
-                    "Position",
-                    "Location",
-                    "Status",
+                    "ID","Emp No","First Name","Last Name","Email",
+                    "Position","Location","Company ID","Provider Status",
+                    "Job Level","Worker Type","Manager Email",
+                    "Active","Rescind","Hire Date","Termination Date",
+                    "Created By","Created Date","Updated By","Updated Date"
                   ]}
                   rows={employeeRows}
-                  increasedTableDensity
                 />
               </BlockStack>
             </Card>
           </Layout.Section>
         )}
 
-        {/* REWARDS */}
+        {/* EMPLOYEE REWARDS TABLE */}
         {rewardRows.length > 0 && (
           <Layout.Section>
             <Card>
               <BlockStack gap="300">
-                <Text variant="headingMd" className="sectionTitle">
-                  Employee Rewards
-                </Text>
+                <Text variant="headingMd">Employee Rewards (All Columns)</Text>
                 <DataTable
                   columnContentTypes={[
-                    "text",
-                    "numeric",
-                    "numeric",
-                    "numeric",
-                    "numeric",
-                    "numeric",
-                    "text",
+                    "numeric","numeric","text","text","text","text",
+                    "numeric","numeric","numeric","numeric","numeric",
+                    "numeric","text","text","text","text"
                   ]}
                   headings={[
-                    "Employee No",
-                    "Points Earned",
-                    "Regular",
-                    "Fill-in",
-                    "Cancellation",
-                    "Unexcused",
-                    "Status",
+                    "Reward ID","Employee ID","Employee No",
+                    "Start Date","End Date","Calculated On",
+                    "Regular","Fill-in","Cancellation","Unexcused",
+                    "Points Earned","Company ID","Notes",
+                    "Active","Created Date","Updated Date"
                   ]}
                   rows={rewardRows}
-                  increasedTableDensity
                 />
               </BlockStack>
             </Card>
           </Layout.Section>
         )}
 
-        {/* ACTIVITY */}
-        {rewardDetailRows.length > 0 && (
+        {/* EMPLOYEE ADDED POINTS TABLE */}
+        {addedPointsRows.length > 0 && (
           <Layout.Section>
             <Card>
               <BlockStack gap="300">
-                <Text variant="headingMd" className="sectionTitle">
-                  Rewards Activity
-                </Text>
+                <Text variant="headingMd">Employee Added Points (All Columns)</Text>
                 <DataTable
                   columnContentTypes={[
-                    "numeric",
-                    "text",
-                    "numeric",
-                    "text",
-                    "text",
-                    "text",
+                    "numeric","text","text","text","text","numeric","text"
                   ]}
                   headings={[
-                    "Reward ID",
-                    "Employee No",
-                    "Points",
-                    "Notes",
-                    "Created",
-                    "Status",
+                    "Employee ID","Date Added","Reward Type",
+                    "Start Date","End Date","Points Added","Notes"
                   ]}
-                  rows={rewardDetailRows}
-                  increasedTableDensity
+                  rows={addedPointsRows}
                 />
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        )}
-
-        {/* SUMMARY */}
-        {employeePointsRows.length > 0 && (
-          <Layout.Section oneHalf>
-            <Card>
-              <BlockStack gap="300">
-                <Text variant="headingMd" className="sectionTitle">
-                  Employee Points Summary
-                </Text>
-                <DataTable
-                  columnContentTypes={[
-                    "numeric",
-                    "text",
-                    "numeric",
-                    "numeric",
-                    "numeric",
-                    "numeric",
-                  ]}
-                  headings={[
-                    "Employee ID",
-                    "Name",
-                    "Available",
-                    "Total Earned",
-                    "Redeemed",
-                    "Added",
-                  ]}
-                  rows={employeePointsRows}
-                />
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        )}
-
-        {/* ADD POINTS RESULT */}
-        {addPointsResult && (
-          <Layout.Section oneHalf>
-            <Card>
-              <BlockStack gap="200">
-                <Text variant="headingMd" className="sectionTitle">
-                  Add Points Result
-                </Text>
-                <Text>
-                  <strong>Status:</strong>{" "}
-                  <Badge
-                    tone={addPointsResult.status === 200 ? "success" : "critical"}
-                  >
-                    {addPointsResult.status}
-                  </Badge>
-                </Text>
-                <Text>
-                  <strong>Message:</strong> {addPointsResult.message}
-                </Text>
               </BlockStack>
             </Card>
           </Layout.Section>
