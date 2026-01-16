@@ -94,7 +94,7 @@ async function fetchAllPages(baseUrl, pageSize = 100) {
 ======================================================== */
 export async function action() {
   try {
-    const EMPLOYEE_ID = 4;
+    const EMPLOYEE_ID = 18237;
 
     console.log("=======================================");
     console.log("🚀 STARTING FULL REWARDS SYNC");
