@@ -1,11 +1,15 @@
 import { getToken, setToken } from "../utils/rewardsToken.server";
 
 /* ========================================================
-   CONFIG
+   ENV CONFIG
 ======================================================== */
 const SHOP = process.env.SHOPIFY_SHOP_DOMAIN;
 const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 const FLOW_SECRET = process.env.FLOW_SECRET;
+
+if (!SHOP || !ACCESS_TOKEN) {
+  throw new Error("❌ Missing Shopify environment variables");
+}
 
 /* ========================================================
    LOGIN TO REWARDS API
@@ -32,7 +36,7 @@ async function login() {
   if (!data?.token) throw new Error("❌ Rewards login failed");
 
   setToken(data.token, 3600);
-  console.log("✅ Rewards token saved");
+  console.log("✅ Rewards token stored");
 
   return data.token;
 }
@@ -49,7 +53,7 @@ async function fetchWithAuth(url) {
   });
 
   if (res.status === 401) {
-    console.log("🔄 Token expired, re-authenticating");
+    console.log("🔄 Rewards token expired, re-login");
     token = await login();
     res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
@@ -61,12 +65,12 @@ async function fetchWithAuth(url) {
 }
 
 /* ========================================================
-   FETCH ALL EMPLOYEES (PAGINATION)
+   FETCH ALL EMPLOYEES (PAGINATED)
 ======================================================== */
 async function fetchAllEmployees(pageSize = 20) {
   let page = 1;
-  let allEmployees = [];
   let hasMore = true;
+  let employees = [];
 
   while (hasMore) {
     const url =
@@ -81,7 +85,7 @@ async function fetchAllEmployees(pageSize = 20) {
       ? res
       : [];
 
-    allEmployees.push(...records);
+    employees.push(...records);
 
     if (records.length < pageSize) {
       hasMore = false;
@@ -90,7 +94,7 @@ async function fetchAllEmployees(pageSize = 20) {
     }
   }
 
-  return allEmployees;
+  return employees;
 }
 
 /* ========================================================
@@ -113,7 +117,7 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 /* ========================================================
-   REMIX ACTION (FLOW ENTRY POINT)
+   REMIX ACTION — SHOPIFY FLOW ENTRY POINT
 ======================================================== */
 export async function action({ request }) {
   console.log("🚀 Shopify Flow → Rewards Sync Triggered");
@@ -121,14 +125,14 @@ export async function action({ request }) {
   /* =========================
      SECURITY CHECK
      ========================= */
-
   const body = await request.json();
-console.log("ENV FLOW_SECRET:", process.env.FLOW_SECRET);
-console.log("BODY secret:", body?.secret);
+
   if (body?.secret !== FLOW_SECRET) {
     console.log("❌ Unauthorized Flow request");
     return new Response("Unauthorized", { status: 401 });
   }
+
+  console.log("✅ Flow authorized");
 
   /* =========================
      FETCH EMPLOYEES
@@ -142,7 +146,12 @@ console.log("BODY secret:", body?.secret);
      CREATE SHOPIFY CUSTOMERS
      ========================= */
   for (const emp of employees) {
-    const { firstName, lastName, emailAddress, employeeID } = emp;
+    const {
+      firstName,
+      lastName,
+      emailAddress,
+      employeeID,
+    } = emp;
 
     if (!emailAddress) {
       results.push({
@@ -168,38 +177,62 @@ console.log("BODY secret:", body?.secret);
         }
       `;
 
-      const result = await shopifyGraphQL(mutation, {
-        input: {
-          firstName,
-          lastName,
-          email: emailAddress,
-          tags: ["pts"],
-          metafields: [
-            {
-              namespace: "custom",
-              key: "employeeid",
-              type: "single_line_text_field",
-              value: String(employeeID),
-            },
-          ],
-        },
-      });
+      const input = {
+        firstName,
+        lastName,
+        email: emailAddress,
+        tags: ["pts"],
+        metafields: [
+          {
+            namespace: "custom",
+            key: "employeeid",
+            type: "single_line_text_field",
+            value: String(employeeID),
+          },
+        ],
+      };
 
-      if (result?.data?.customerCreate?.userErrors?.length) {
+      const result = await shopifyGraphQL(mutation, { input });
+
+      /* ===== GRAPHQL HARD FAIL ===== */
+      if (result.errors) {
+        console.error("❌ Shopify GraphQL error:", result.errors);
+
         results.push({
           email: emailAddress,
           status: "failed",
-          errors: result.data.customerCreate.userErrors,
+          errors: result.errors,
+        });
+        continue;
+      }
+
+      const createResult = result.data?.customerCreate;
+
+      if (!createResult) {
+        results.push({
+          email: emailAddress,
+          status: "failed",
+          error: "customerCreate missing in response",
+        });
+        continue;
+      }
+
+      if (createResult.userErrors.length > 0) {
+        results.push({
+          email: emailAddress,
+          status: "failed",
+          errors: createResult.userErrors,
         });
       } else {
         results.push({
           email: emailAddress,
           status: "created",
-          shopifyCustomerId:
-            result.data.customerCreate.customer.id,
+          shopifyCustomerId: createResult.customer.id,
         });
       }
     } catch (error) {
+      console.error("❌ Unexpected error:", error);
+
       results.push({
         email: emailAddress,
         status: "error",
