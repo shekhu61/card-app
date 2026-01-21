@@ -5,8 +5,6 @@ import { getToken, setToken } from "../utils/rewardsToken.server";
    LOGIN TO REWARDS API
 ======================================================== */
 async function login() {
-  console.log("🔐 Rewards API login");
-
   const res = await fetch(
     "https://stg-rewardsapi.centerforautism.com/Authentication/Login",
     {
@@ -20,14 +18,12 @@ async function login() {
   );
 
   const text = await res.text();
-  if (!text) throw new Error("❌ Empty login response");
+  if (!text) throw new Error("Empty login response");
 
   const data = JSON.parse(text);
-  if (!data?.token) throw new Error("❌ Login failed");
+  if (!data?.token) throw new Error("Login failed");
 
   setToken(data.token, 3600);
-  console.log("✅ Rewards token stored");
-
   return data.token;
 }
 
@@ -43,9 +39,7 @@ async function fetchWithAuth(url) {
   });
 
   if (res.status === 401) {
-    console.log("🔁 Token expired, re-login");
     token = await login();
-
     res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -70,8 +64,6 @@ async function fetchAllEmployees(pageSize = 20) {
       `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/EmployeeDetails` +
       `?PageNumber=${page}&PageSize=${pageSize}&FromDate=2025-03-01&ToDate=2025-12-31`;
 
-    console.log(`📄 Fetching employees page ${page}`);
-
     const res = await fetchWithAuth(url);
 
     const records = Array.isArray(res?.data)
@@ -89,28 +81,37 @@ async function fetchAllEmployees(pageSize = 20) {
     }
   }
 
-  console.log(`✅ Total employees fetched: ${allEmployees.length}`);
   return allEmployees;
 }
 
 /* ========================================================
-   CORE LOGIC (REUSED BY FLOW + UI + API)
+   REMIX ACTION
 ======================================================== */
-export async function runRewardsEmployees(admin) {
-  console.log("🚀 Rewards employee sync started");
+export async function action({ request }) {
+  console.log("🔹 Sync employees → Shopify started");
 
+  // 🔐 Protect route
+  const { admin } = await authenticate.admin(request);
+
+  /* =========================
+     1️⃣ FETCH EMPLOYEES
+     ========================= */
   const employees = await fetchAllEmployees();
+  console.log(`✅ Total employees fetched: ${employees.length}`);
 
+  /* =========================
+     2️⃣ CREATE SHOPIFY CUSTOMERS
+     ========================= */
   const results = [];
-  let created = 0;
-  let failed = 0;
-  let skipped = 0;
 
   for (const emp of employees) {
-    const { firstName, lastName, emailAddress, employeeID } = emp;
+    const {
+      firstName,
+      lastName,
+      emailAddress,
+    } = emp;
 
     if (!emailAddress) {
-      skipped++;
       results.push({
         email: null,
         status: "skipped",
@@ -120,51 +121,50 @@ export async function runRewardsEmployees(admin) {
     }
 
     try {
-      const mutation = `
-        mutation createCustomer($input: CustomerInput!) {
-          customerCreate(input: $input) {
-            customer {
-              id
-              email
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `;
+     const mutation = `
+  mutation createCustomer($input: CustomerInput!) {
+    customerCreate(input: $input) {
+      customer {
+        id
+        email
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
 
-      const response = await admin.graphql(mutation, {
-        variables: {
-          input: {
-            firstName,
-            lastName,
-            email: emailAddress,
-            tags: ["pts"],
-            metafields: [
-              {
-                namespace: "custom",
-                key: "employeeid",
-                type: "single_line_text_field",
-                value: String(employeeID),
-              },
-            ],
-          },
+const response = await admin.graphql(mutation, {
+  variables: {
+    input: {
+      firstName,
+      lastName,
+      email: emailAddress,
+      tags: ["pts"],
+      metafields: [
+        {
+          namespace: "custom",
+          key: "employeeid",
+          type: "single_line_text_field",
+          value: String(emp.employeeID),
         },
-      });
+      ],
+    },
+  },
+});
+
 
       const result = await response.json();
 
-      if (result?.data?.customerCreate?.userErrors?.length) {
-        failed++;
+      if (result?.data?.customerCreate?.userErrors?.length > 0) {
         results.push({
           email: emailAddress,
           status: "failed",
           errors: result.data.customerCreate.userErrors,
         });
       } else {
-        created++;
         results.push({
           email: emailAddress,
           status: "created",
@@ -173,7 +173,6 @@ export async function runRewardsEmployees(admin) {
         });
       }
     } catch (error) {
-      failed++;
       results.push({
         email: emailAddress,
         status: "error",
@@ -182,35 +181,13 @@ export async function runRewardsEmployees(admin) {
     }
   }
 
-  console.log("🏁 Rewards employee sync completed");
-
-  return {
+  /* =========================
+     FINAL RESPONSE
+     ========================= */
+  return Response.json({
+    success: true,
     totalEmployees: employees.length,
     totalProcessed: results.length,
-    created,
-    failed,
-    skipped,
     results,
-  };
-}
-
-/* ========================================================
-   REMIX ACTION (MANUAL / API CALL)
-======================================================== */
-export async function action({ request }) {
-  console.log("🔹 API / Flow → rewards-employees called");
-
-  const { admin } = await authenticate.admin(request);
-
-  const result = await runRewardsEmployees(admin);
-
-  return new Response(
-    JSON.stringify({
-      success: true,
-      ...result,
-    }),
-    {
-      headers: { "Content-Type": "application/json" },
-    }
-  );
+  });
 }
