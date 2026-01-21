@@ -27,7 +27,7 @@ export default function App() {
     <ShopifyAppProvider embedded apiKey={apiKey}>
       <PolarisAppProvider i18n={en}>
         <s-app-nav>
-          <a href="/app/rewards">Rewards & Employees</a>
+          <a href="/app/rewards">Employees Data</a>
         </s-app-nav>
         <Outlet />
       </PolarisAppProvider>
