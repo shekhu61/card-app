@@ -1,10 +1,18 @@
-import { authenticate } from "../shopify.server";
 import { getToken, setToken } from "../utils/rewardsToken.server";
+
+/* ========================================================
+   CONFIG
+======================================================== */
+const SHOP = process.env.SHOPIFY_SHOP_DOMAIN;
+const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+const FLOW_SECRET = process.env.FLOW_SECRET;
 
 /* ========================================================
    LOGIN TO REWARDS API
 ======================================================== */
 async function login() {
+  console.log("🔐 Logging into Rewards API");
+
   const res = await fetch(
     "https://stg-rewardsapi.centerforautism.com/Authentication/Login",
     {
@@ -18,17 +26,19 @@ async function login() {
   );
 
   const text = await res.text();
-  if (!text) throw new Error("Empty login response");
+  if (!text) throw new Error("❌ Empty login response");
 
   const data = JSON.parse(text);
-  if (!data?.token) throw new Error("Login failed");
+  if (!data?.token) throw new Error("❌ Rewards login failed");
 
   setToken(data.token, 3600);
+  console.log("✅ Rewards token saved");
+
   return data.token;
 }
 
 /* ========================================================
-   SAFE FETCH WITH TOKEN AUTO-REFRESH
+   SAFE FETCH WITH AUTO TOKEN REFRESH
 ======================================================== */
 async function fetchWithAuth(url) {
   let token = getToken();
@@ -39,6 +49,7 @@ async function fetchWithAuth(url) {
   });
 
   if (res.status === 401) {
+    console.log("🔄 Token expired, re-authenticating");
     token = await login();
     res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
@@ -46,18 +57,16 @@ async function fetchWithAuth(url) {
   }
 
   const text = await res.text();
-  if (!text) return null;
-
-  return JSON.parse(text);
+  return text ? JSON.parse(text) : null;
 }
 
 /* ========================================================
-   FETCH ALL EMPLOYEES (PAGINATED)
+   FETCH ALL EMPLOYEES (PAGINATION)
 ======================================================== */
 async function fetchAllEmployees(pageSize = 20) {
   let page = 1;
-  let hasMore = true;
   let allEmployees = [];
+  let hasMore = true;
 
   while (hasMore) {
     const url =
@@ -85,35 +94,56 @@ async function fetchAllEmployees(pageSize = 20) {
 }
 
 /* ========================================================
-   REMIX ACTION
+   SHOPIFY GRAPHQL HELPER
+======================================================== */
+async function shopifyGraphQL(query, variables = {}) {
+  const res = await fetch(
+    `https://${SHOP}/admin/api/2024-01/graphql.json`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": ACCESS_TOKEN,
+      },
+      body: JSON.stringify({ query, variables }),
+    }
+  );
+
+  return res.json();
+}
+
+/* ========================================================
+   REMIX ACTION (FLOW ENTRY POINT)
 ======================================================== */
 export async function action({ request }) {
-  console.log("🔹 Sync employees → Shopify started");
-
-  // 🔐 Protect route
-  const { admin } = await authenticate.admin(request);
+  console.log("🚀 Shopify Flow → Rewards Sync Triggered");
 
   /* =========================
-     1️⃣ FETCH EMPLOYEES
+     SECURITY CHECK
+     ========================= */
+  const body = await request.json();
+
+  if (body?.secret !== FLOW_SECRET) {
+    console.log("❌ Unauthorized Flow request");
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  /* =========================
+     FETCH EMPLOYEES
      ========================= */
   const employees = await fetchAllEmployees();
-  console.log(`✅ Total employees fetched: ${employees.length}`);
+  console.log(`✅ Employees fetched: ${employees.length}`);
 
-  /* =========================
-     2️⃣ CREATE SHOPIFY CUSTOMERS
-     ========================= */
   const results = [];
 
+  /* =========================
+     CREATE SHOPIFY CUSTOMERS
+     ========================= */
   for (const emp of employees) {
-    const {
-      firstName,
-      lastName,
-      emailAddress,
-    } = emp;
+    const { firstName, lastName, emailAddress, employeeID } = emp;
 
     if (!emailAddress) {
       results.push({
-        email: null,
         status: "skipped",
         reason: "Missing email",
       });
@@ -121,44 +151,39 @@ export async function action({ request }) {
     }
 
     try {
-     const mutation = `
-  mutation createCustomer($input: CustomerInput!) {
-    customerCreate(input: $input) {
-      customer {
-        id
-        email
-      }
-      userErrors {
-        field
-        message
-      }
-    }
-  }
-`;
+      const mutation = `
+        mutation createCustomer($input: CustomerInput!) {
+          customerCreate(input: $input) {
+            customer {
+              id
+              email
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
 
-const response = await admin.graphql(mutation, {
-  variables: {
-    input: {
-      firstName,
-      lastName,
-      email: emailAddress,
-      tags: ["pts"],
-      metafields: [
-        {
-          namespace: "custom",
-          key: "employeeid",
-          type: "single_line_text_field",
-          value: String(emp.employeeID),
+      const result = await shopifyGraphQL(mutation, {
+        input: {
+          firstName,
+          lastName,
+          email: emailAddress,
+          tags: ["pts"],
+          metafields: [
+            {
+              namespace: "custom",
+              key: "employeeid",
+              type: "single_line_text_field",
+              value: String(employeeID),
+            },
+          ],
         },
-      ],
-    },
-  },
-});
+      });
 
-
-      const result = await response.json();
-
-      if (result?.data?.customerCreate?.userErrors?.length > 0) {
+      if (result?.data?.customerCreate?.userErrors?.length) {
         results.push({
           email: emailAddress,
           status: "failed",
