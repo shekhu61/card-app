@@ -75,7 +75,7 @@ async function fetchAllEmployees(pageSize = 20) {
   while (hasMore) {
     const url =
       `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/EmployeeDetails` +
-      `?PageNumber=${page}&PageSize=${pageSize}&FromDate=2025-03-01&ToDate=2025-12-31`;
+      `?PageNumber=${page}&PageSize=${pageSize}&FromDate=2025-01-01&ToDate=2025-12-31`;
 
     const res = await fetchWithAuth(url);
 
