@@ -1,7 +1,7 @@
 import { authenticate } from "../shopify.server";
 
 /* ======================================================
-   HARD-CODED REWARDS API CONFIG (NO ENV)
+   HARD-CODED REWARDS API CONFIG
 ====================================================== */
 const BASE_URL = "https://stg-rewardsapi.centerforautism.com";
 const USERNAME = "admin";
@@ -14,7 +14,7 @@ export async function action({ request }) {
   console.log("🔵 App Proxy hit");
 
   try {
-
+    // Validate Shopify proxy
     const { admin } = await authenticate.public.appProxy(request);
 
     /* ----------------------------------------------
@@ -27,7 +27,7 @@ export async function action({ request }) {
 
     if (!employeeId || !email) {
       return Response.json(
-        { error: "Employee ID or email missing" },
+        { success: false, error: "Employee ID or email missing" },
         { status: 400 }
       );
     }
@@ -56,10 +56,20 @@ export async function action({ request }) {
 
     console.log("✅ Employee Points Result:", pointsData);
 
-    const coins = pointsData.availablePoints || 0;
+    // Extract all values explicitly
+    const {
+      employeeID,
+      employeeName,
+      availablePoints,
+      totalEarnedPoints,
+      redeemedPoints,
+      addedPoints,
+    } = pointsData;
+
+    const coins = availablePoints || 0;
 
     /* ----------------------------------------------
-       FETCH SHOPIFY CUSTOMER ID BY EMAIL
+       FETCH SHOPIFY CUSTOMER ID
     ---------------------------------------------- */
     const customerRes = await admin.graphql(
       `
@@ -219,11 +229,19 @@ export async function action({ request }) {
     console.log("✅ Sync completed for", email);
 
     /* ----------------------------------------------
-       FINAL RESPONSE
+       FINAL RESPONSE (ALL EMPLOYEE DATA EXPORTED)
     ---------------------------------------------- */
     return Response.json({
       success: true,
-      employee: pointsData,
+
+      employeeID,
+      employeeName,
+
+      availablePoints,
+      totalEarnedPoints,
+      redeemedPoints,
+      addedPoints,
+
       email,
       coins,
       discountCode,
