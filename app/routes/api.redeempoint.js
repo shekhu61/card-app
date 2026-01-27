@@ -6,7 +6,9 @@ export async function loader({ request }) {
   try {
     /* ================= READ HEADERS ================= */
     const raw = request.headers.get("points"); // "90.090.0"
-    const rawOrderId = request.headers.get("orderId");
+    const rawOrderId = request.headers.get("ordername");
+    const rawOrder_Id = request.headers.get("orderId");
+    console.log(rawOrderId);
     const employeeId = request.headers.get("employeeId");
 
     if (!raw || !rawOrderId || !employeeId) {
@@ -102,7 +104,7 @@ export async function loader({ request }) {
     const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN; // Admin API token
 
     const metafieldRes = await fetch(
-      `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${orderId}/metafields.json`,
+      `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${rawOrder_Id}/metafields.json`,
       {
         method: "POST",
         headers: {
