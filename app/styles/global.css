@@ -12,6 +12,7 @@
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   margin-bottom: 2rem;
+  padding: 10px;
   transition: box-shadow 0.3s ease;
 }
 
@@ -146,3 +147,63 @@ display: none !important;
 /* --------------------------------------------------------------- */
 
 
+/* Container Spacing */
+.Polaris-Labelled__LabelWrapper {
+  margin-bottom: 8px;
+}
+
+/* Label Styling */
+.Polaris-Label__Text {
+  font-weight: 600;
+  color: #202223;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+/* The Input Backdrop (Main Field Design) */
+.Polaris-TextField {
+  position: relative;
+  background-color: #ffffff;
+  border-radius: 10px; /* Softer corners */
+  transition: all 0.2s ease-in-out;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.Polaris-TextField__Input {
+  padding: 12px 16px;
+  font-size: 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  color: #1f2937;
+  appearance: none; /* Removes default browser styling */
+}
+
+/* Focus State: Soft Glow */
+.Polaris-TextField:focus-within {
+  border-color: #008060; /* Shopify Green or pick your brand color */
+  box-shadow: 0 0 0 3px rgba(0, 128, 96, 0.15);
+  outline: none;
+}
+
+/* Hide the Spinner Icons (Up/Down Arrows) */
+.Polaris-TextField__Spinner, 
+.Polaris-TextField__SpinnerIcon {
+  display: none !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Also remove native browser number arrows */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Help Text Styling */
+.Polaris-Labelled__HelpText {
+  margin-top: 6px;
+  font-style: italic;
+  color: #6d7175;
+  font-size: 12px;
+}

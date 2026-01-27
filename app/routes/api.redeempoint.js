@@ -1,39 +1,73 @@
+import prisma from "../db.server";
+
 export async function loader({ request }) {
   console.log("🚀 Shopify Flow Redeem Triggered");
 
   try {
+    /* ================= READ HEADERS ================= */
+
     const raw = request.headers.get("points"); // "90.090.0"
-
-// Split by ".0" and remove empty
-const values = raw.split(".0").filter(v => v !== "");
-
-
-
-
     const rawOrderId = request.headers.get("orderId");
-const orderId = rawOrderId.replace("#", "").trim();
-
     const employeeId = request.headers.get("employeeId");
-    const pointsRaw = request.headers.get("points");
 
-    console.log("📦 Headers:", { orderId, employeeId, pointsRaw });
-
-    if (!orderId || !employeeId || !pointsRaw) {
+    if (!raw || !rawOrderId || !employeeId) {
       return new Response("Missing parameters", { status: 400 });
     }
 
-const discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
+    const orderId = rawOrderId.replace("#", "").trim();
+
+    // Split "90.090.0" → ["90","90"]
+    const values = raw.split(".0").filter(v => v !== "");
+    const discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
+
     if (isNaN(discountAmount) || discountAmount <= 0) {
       return new Response("Invalid discount amount", { status: 400 });
     }
 
-    // 🪙 1 currency = 1 point
-    const pointsToRedeem = Math.round(discountAmount);
-    console.log("🪙 Redeeming:", pointsToRedeem);
+    console.log("💲 Discount total:", discountAmount);
 
-    const BASE_URL = "https://stg-rewardsapi.centerforautism.com";
+    /* ================= LOAD REWARD RULE ================= */
+
+    const rewardRule = await prisma.rewardRule.findFirst({
+      where: { isActive: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!rewardRule) {
+      return new Response("No active reward rule found", { status: 500 });
+    }
+
+    const { pointsPerUnit, currencyUnit } = rewardRule;
+
+    if (pointsPerUnit <= 0 || currencyUnit <= 0) {
+      return new Response("Invalid reward rule configuration", { status: 500 });
+    }
+
+    const pointsPerDollar = pointsPerUnit / currencyUnit;
+
+    console.log("🎯 Reward Rule:", {
+      pointsPerUnit,
+      currencyUnit,
+      pointsPerDollar,
+    });
+
+    /* ================= CALCULATE POINTS ================= */
+
+    const pointsToRedeem = Math.round(discountAmount * pointsPerDollar);
+
+    console.log("🪙 Points to redeem:", {
+      discountAmount,
+      pointsPerDollar,
+      pointsToRedeem,
+    });
+
+    if (pointsToRedeem <= 0) {
+      return new Response("Calculated points invalid", { status: 400 });
+    }
 
     /* ================= LOGIN ================= */
+
+    const BASE_URL = "https://stg-rewardsapi.centerforautism.com";
 
     const loginRes = await fetch(`${BASE_URL}/Authentication/Login`, {
       method: "POST",
@@ -91,15 +125,20 @@ const discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
       throw new Error(redeemText);
     }
 
+    /* ================= SUCCESS ================= */
+
     return new Response(
       JSON.stringify({
         success: true,
         orderId,
         employeeId,
+        discountAmount,
+        pointsPerDollar,
         pointsRedeemed: pointsToRedeem,
       }),
       { headers: { "Content-Type": "application/json" } }
     );
+
   } catch (err) {
     console.error("🔥 Redeem error:", err.message);
     return new Response(err.message, { status: 500 });

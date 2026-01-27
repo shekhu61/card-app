@@ -1,21 +1,10 @@
 import { getToken, setToken } from "../utils/rewardsToken.server";
 
 /* ========================================================
-   ENV CONFIG
-======================================================== */
-const SHOP = process.env.SHOPIFY_SHOP_DOMAIN;
-const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
-const FLOW_SECRET = process.env.FLOW_SECRET;
-
-if (!SHOP || !ACCESS_TOKEN) {
-  throw new Error("❌ Missing Shopify environment variables");
-}
-
-/* ========================================================
-   LOGIN TO REWARDS API
+   LOGIN
 ======================================================== */
 async function login() {
-  console.log("🔐 Logging into Rewards API");
+  console.log("🔐 Logging in...");
 
   const res = await fetch(
     "https://stg-rewardsapi.centerforautism.com/Authentication/Login",
@@ -33,16 +22,16 @@ async function login() {
   if (!text) throw new Error("❌ Empty login response");
 
   const data = JSON.parse(text);
-  if (!data?.token) throw new Error("❌ Rewards login failed");
+  if (!data?.token) throw new Error("❌ Login failed");
 
   setToken(data.token, 3600);
-  console.log("✅ Rewards token stored");
+  console.log("✅ Token saved");
 
   return data.token;
 }
 
 /* ========================================================
-   SAFE FETCH WITH AUTO TOKEN REFRESH
+   SAFE FETCH WITH TOKEN AUTO-REFRESH
 ======================================================== */
 async function fetchWithAuth(url) {
   let token = getToken();
@@ -53,29 +42,42 @@ async function fetchWithAuth(url) {
   });
 
   if (res.status === 401) {
-    console.log("🔄 Rewards token expired, re-login");
+    console.log("🔁 Token expired. Re-login...");
     token = await login();
+
     res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
     });
   }
 
   const text = await res.text();
-  return text ? JSON.parse(text) : null;
+  if (!text) {
+    console.warn("⚠️ Empty response:", url);
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    console.error("❌ Invalid JSON:", url);
+    throw err;
+  }
 }
 
 /* ========================================================
-   FETCH ALL EMPLOYEES (PAGINATED)
+   FETCH ALL EMPLOYEE DATA (PAGINATED)
 ======================================================== */
-async function fetchAllEmployees(pageSize = 20) {
+async function fetchAllEmployeeRecords(pageSize = 20) {
   let page = 1;
   let hasMore = true;
-  let employees = [];
+  let allRecords = [];
 
   while (hasMore) {
     const url =
       `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/EmployeeDetails` +
       `?PageNumber=${page}&PageSize=${pageSize}&FromDate=2025-01-01&ToDate=2025-12-31`;
+
+    console.log(`📄 Fetching employee list page ${page}`);
 
     const res = await fetchWithAuth(url);
 
@@ -85,7 +87,9 @@ async function fetchAllEmployees(pageSize = 20) {
       ? res
       : [];
 
-    employees.push(...records);
+    console.log(`📦 Records on page ${page}: ${records.length}`);
+
+    allRecords.push(...records);
 
     if (records.length < pageSize) {
       hasMore = false;
@@ -94,160 +98,71 @@ async function fetchAllEmployees(pageSize = 20) {
     }
   }
 
-  return employees;
+  console.log("✅ ALL EMPLOYEES FETCHED:", allRecords.length);
+
+  return {
+    totalRecords: allRecords.length,
+    totalPages: page,
+    pageSize,
+    data: allRecords,
+  };
 }
 
 /* ========================================================
-   SHOPIFY GRAPHQL HELPER
+   FETCH SINGLE EMPLOYEE BY ID
 ======================================================== */
-async function shopifyGraphQL(query, variables = {}) {
-  const res = await fetch(
-    `https://${SHOP}/admin/api/2024-01/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": ACCESS_TOKEN,
+async function fetchEmployeeById(employeeId) {
+  console.log(`👤 Fetching employee by ID: ${employeeId}`);
+
+  const url =
+    `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/GetEmployeeById` +
+    `?EmployeeId=${employeeId}`;
+
+  const res = await fetchWithAuth(url);
+
+  console.log("👤 Employee detail response:", res);
+
+  return res;
+}
+
+/* ========================================================
+   MAIN ACTION
+======================================================== */
+export async function action() {
+  try {
+    console.log("🚀 STARTING EMPLOYEE DATA EXTRACTION");
+
+    // 1️⃣ Fetch all employees
+    const allEmployees = await fetchAllEmployeeRecords(20);
+
+    // 2️⃣ Fetch single employee details (example ID = 46)
+    const employeeById = await fetchEmployeeById(18237);
+
+    // 3️⃣ Combine & return everything
+    const finalResponse = {
+      summary: {
+        totalEmployees: allEmployees.totalRecords,
+        totalPages: allEmployees.totalPages,
+        pageSize: allEmployees.pageSize,
       },
-      body: JSON.stringify({ query, variables }),
-    }
-  );
+      allEmployees: allEmployees.data,
+      selectedEmployee: employeeById,
+    };
 
-  return res.json();
-}
+    console.log("=======================================");
+    console.log("✅ FINAL COMBINED RESPONSE");
+    console.log(finalResponse);
+    console.log("=======================================");
 
-/* ========================================================
-   REMIX ACTION — SHOPIFY FLOW ENTRY POINT
-======================================================== */
-export async function action({ request }) {
-  console.log("🚀 Shopify Flow → Rewards Sync Triggered");
+    return new Response(JSON.stringify(finalResponse), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    console.error("🔥 SYSTEM FAILURE:", error);
 
-  /* =========================
-     SECURITY CHECK
-     ========================= */
-  const body = await request.json();
-
-  if (body?.secret !== FLOW_SECRET) {
-    console.log("❌ Unauthorized Flow request");
-    return new Response("Unauthorized", { status: 401 });
+    return new Response(
+      JSON.stringify({ error: "Employee data extraction failed" }),
+      { status: 500 }
+    );
   }
-
-  console.log("✅ Flow authorized");
-
-  /* =========================
-     FETCH EMPLOYEES
-     ========================= */
-  const employees = await fetchAllEmployees();
-  console.log(`✅ Employees fetched: ${employees.length}`);
-
-  const results = [];
-
-  /* =========================
-     CREATE SHOPIFY CUSTOMERS
-     ========================= */
-  for (const emp of employees) {
-    const {
-      firstName,
-      lastName,
-      emailAddress,
-      employeeID,
-    } = emp;
-
-    if (!emailAddress) {
-      results.push({
-        status: "skipped",
-        reason: "Missing email",
-      });
-      continue;
-    }
-
-    try {
-      const mutation = `
-        mutation createCustomer($input: CustomerInput!) {
-          customerCreate(input: $input) {
-            customer {
-              id
-              email
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `;
-
-      const input = {
-        firstName,
-        lastName,
-        email: emailAddress,
-        tags: ["pts"],
-        metafields: [
-          {
-            namespace: "custom",
-            key: "employeeid",
-            type: "single_line_text_field",
-            value: String(employeeID),
-          },
-        ],
-      };
-
-      const result = await shopifyGraphQL(mutation, { input });
-
-      /* ===== GRAPHQL HARD FAIL ===== */
-      if (result.errors) {
-        console.error("❌ Shopify GraphQL error:", result.errors);
-
-        results.push({
-          email: emailAddress,
-          status: "failed",
-          errors: result.errors,
-        });
-        continue;
-      }
-
-      const createResult = result.data?.customerCreate;
-
-      if (!createResult) {
-        results.push({
-          email: emailAddress,
-          status: "failed",
-          error: "customerCreate missing in response",
-        });
-        continue;
-      }
-
-      if (createResult.userErrors.length > 0) {
-        results.push({
-          email: emailAddress,
-          status: "failed",
-          errors: createResult.userErrors,
-        });
-      } else {
-        results.push({
-          email: emailAddress,
-          status: "created",
-          shopifyCustomerId: createResult.customer.id,
-        });
-      }
-    } catch (error) {
-      console.error("❌ Unexpected error:", error);
-
-      results.push({
-        email: emailAddress,
-        status: "error",
-        error: error.message,
-      });
-    }
-  }
-
-  /* =========================
-     FINAL RESPONSE
-     ========================= */
-  return Response.json({
-    success: true,
-    totalEmployees: employees.length,
-    totalProcessed: results.length,
-    results,
-  });
 }

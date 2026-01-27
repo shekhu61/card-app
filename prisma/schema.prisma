@@ -33,41 +33,13 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
-model Employee {
-  id              Int      @id @default(autoincrement())
-  employeeID      String      @unique
-  employeeNumber  String
-  firstName       String
-  lastName        String
-  emailAddress    String
-  position        String
-  officeLocation  String
-  isActive        Boolean
-  workerType      String
-  hireDate        DateTime
-  terminationDate DateTime
-  createdAt       DateTime @default(now())
+model RewardRule {
+  id             Int      @id @default(autoincrement())
+  pointsPerUnit  Float    // e.g. 5   (points)
+  currencyUnit   Float    // e.g. 1   (dollar)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
-
-
-// schema.prisma
-model CustomerCoins {
-  id        Int                 @id @default(autoincrement())
-  name      String
-  email     String              @unique
-  coins     Int
-  discount  CustomerDiscounts?
-}
-
-model CustomerDiscounts {
-  id           Int           @id @default(autoincrement())
-  email        String        @unique
-  discountCode String
-  discountId   String
-  customer     CustomerCoins @relation(fields: [email], references: [email])
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-}
-
 
 
