@@ -102,8 +102,8 @@ const shopifyOrderId = rawOrder_Id.split("/").pop(); // 6851559817465
     if (!redeemRes.ok) throw new Error(redeemText);
 
     /* ================= UPDATE SHOPIFY METAFIELD ================= */
-    const SHOPIFY_STORE = process.env.SHOPIFY_STORE; // e.g. "mystore.myshopify.com"
-    const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN; // Admin API token
+    const SHOPIFY_STORE = process.env.SHOPIFY_SHOP_DOMAIN; // e.g. "mystore.myshopify.com"
+    const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN; // Admin API token
 
     let meta_url = `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${shopifyOrderId}/metafields.json`;
     console.log(meta_url);
