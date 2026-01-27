@@ -2,6 +2,13 @@ export async function loader({ request }) {
   console.log("🚀 Shopify Flow Redeem Triggered");
 
   try {
+    const raw = request.headers.get("points");
+
+const matches = raw.match(/[\d.]+/g) || [];
+const discountAmount_raw = matches.reduce((sum, v) => sum + parseFloat(v), 0);
+
+
+
     const rawOrderId = request.headers.get("orderId");
 const orderId = rawOrderId.replace("#", "").trim();
 
@@ -14,7 +21,7 @@ const orderId = rawOrderId.replace("#", "").trim();
       return new Response("Missing parameters", { status: 400 });
     }
 
-    const discountAmount = parseFloat(pointsRaw);
+    const discountAmount = parseFloat(discountAmount_raw);
     if (isNaN(discountAmount) || discountAmount <= 0) {
       return new Response("Invalid discount amount", { status: 400 });
     }
