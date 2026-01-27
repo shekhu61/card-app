@@ -1,44 +1,37 @@
-export async function loader() {
-  return new Response("Method Not Allowed", { status: 405 });
-}
-
-export async function action({ request }) {
-  console.log("🚀 Redeem API triggered");
+export async function loader({ request }) {
+  console.log("🚀 Shopify Flow Redeem Triggered (GET)");
 
   try {
-    const body = await request.json();
-    console.log("📦 Request body:", body);
+    const url = new URL(request.url);
 
-    const BASE_URL = "https://stg-rewardsapi.centerforautism.com";
-    const USERNAME = "admin";
-    const PASSWORD = "admin";
+    const orderId = url.searchParams.get("orderId");
+    const employeeId = url.searchParams.get("employeeId");
+    const pointsRaw = url.searchParams.get("points");
 
-    /* ================= SANITIZE INPUT ================= */
+    console.log("📦 Raw Params:", { orderId, employeeId, pointsRaw });
 
-    const employeeId = body.employeeId;
-    const orderId = body.orderId;
-
-    if (!employeeId || !orderId) {
-      throw new Error("Missing employeeId or orderId");
+    if (!orderId || !employeeId || !pointsRaw) {
+      return new Response("Missing parameters", { status: 400 });
     }
 
-    // Shopify Flow sends discount as multi-line string — clean it
-    const discountRaw = String(body.points || "")
-      .replace(/[\n\r]/g, "")
-      .trim();
-
-    const discountAmount = parseFloat(discountRaw);
+    // Clean Shopify Flow discount
+    const clean = pointsRaw.replace(/[\n\r]/g, "").trim();
+    const discountAmount = parseFloat(clean);
 
     if (isNaN(discountAmount) || discountAmount <= 0) {
-      throw new Error("Invalid discount amount received");
+      return new Response("Invalid discount amount", { status: 400 });
     }
 
-    // 💰 Convert Discount → Points (example: ₹1 = 10 points)
+    // 💰 Convert discount → points
     const POINTS_PER_CURRENCY = 10;
     const pointsToRedeem = Math.round(discountAmount * POINTS_PER_CURRENCY);
 
     console.log("💰 Discount:", discountAmount);
-    console.log("🪙 Points to Redeem:", pointsToRedeem);
+    console.log("🪙 Points:", pointsToRedeem);
+
+    const BASE_URL = "https://stg-rewardsapi.centerforautism.com";
+    const USERNAME = "admin";
+    const PASSWORD = "admin";
 
     /* ================= LOGIN ================= */
 
@@ -52,16 +45,13 @@ export async function action({ request }) {
     });
 
     const loginData = await loginRes.json();
-
     const token =
       loginData.Token ||
       loginData.AccessToken ||
       loginData.access_token ||
       loginData.token;
 
-    if (!token) {
-      throw new Error("Login failed — token missing");
-    }
+    if (!token) throw new Error("Login failed");
 
     /* ================= REDEEM ================= */
 
@@ -88,7 +78,7 @@ export async function action({ request }) {
       throw new Error(redeemText);
     }
 
-    console.log("🎉 Redeem success:", redeemText);
+    console.log("🎉 Redeemed:", redeemText);
 
     return new Response(
       JSON.stringify({
@@ -100,15 +90,8 @@ export async function action({ request }) {
       }),
       { headers: { "Content-Type": "application/json" } }
     );
-  } catch (error) {
-    console.error("🔥 Redeem API Error:", error.message);
-
-    return new Response(
-      JSON.stringify({
-        success: false,
-        message: error.message,
-      }),
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error("🔥 Redeem Error:", err.message);
+    return new Response(err.message, { status: 500 });
   }
 }
