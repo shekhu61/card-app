@@ -250,7 +250,7 @@ export async function action({ request }) {
                 namespace: "custom",
                 key: "coins",
                 type: "single_line_text_field",
-                value: String(coins),
+                value: String(availablePoints),
               },
               {
                 namespace: "custom",
