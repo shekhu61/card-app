@@ -2,7 +2,7 @@
 
 client_id = "938a7af4107fd5f1dd97944f178a40ef"
 name = "rewards-coins-new"
-application_url = "https://shopify-rewards-app-production.up.railway.app"
+application_url = "https://card-app-production.up.railway.app"
 embedded = true
 
 [build]
@@ -24,7 +24,7 @@ api_version = "2026-01"
 scopes = "read_customers, write_customers, write_discounts, read_discounts, read_orders, write_metafields, write_orders"
 
 [auth]
-redirect_urls = [ "https://shopify-rewards-app-production.up.railway.app/api/auth" ]
+redirect_urls = [ "https://card-app-production.up.railway.app/api/auth" ]
 
 [app_proxy]
 url = "/api/proxy"
