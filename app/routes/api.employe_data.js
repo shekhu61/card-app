@@ -115,8 +115,8 @@ async function fetchEmployeeById(employeeId) {
   console.log(`👤 Fetching employee by ID: ${employeeId}`);
 
   const url =
-    `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/GetEmployeeAddedPointsById` +
-    `?EmployeeId=18237`;
+    `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/GetEmployeePoints` +
+    `?EmployeeId=18904`;
 
   const res = await fetchWithAuth(url);
 
