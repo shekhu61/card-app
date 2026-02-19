@@ -88,16 +88,11 @@ async function shopifyGraphQL(query, variables) {
   return res.json();
 }
 
-/* ================= FLOW ACTION ================= */
-export async function action({ request }) {
-  console.log("Rewards sync running");
+/* ================= BACKGROUND PROCESS ================= */
+async function processEmployees() {
+  console.log("Background process started");
 
   try {
-    const body = await request.json();
-    if (!body || body.secret !== FLOW_SECRET) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
     const employees = await fetchAllEmployees();
 
     const mutation = `
@@ -127,17 +122,29 @@ export async function action({ request }) {
         ],
       };
 
-      const result = await shopifyGraphQL(mutation, { input });
+      await shopifyGraphQL(mutation, { input });
 
-      // Ignore duplicate email errors
-      const errors = result?.data?.customerCreate?.userErrors;
-      if (errors && errors.length > 0) {
-        continue;
-      }
+      // small delay to prevent throttling
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
-
-    return Response.json({ success: true });
   } catch (err) {
-    return Response.json({ success: true });
+    // silently fail (Flow already returned success)
   }
+}
+
+/* ================= FLOW ACTION ================= */
+export async function action({ request }) {
+  console.log("Rewards sync running");
+
+  const body = await request.json();
+
+  if (!body || body.secret !== FLOW_SECRET) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Start background process (non-blocking)
+  processEmployees();
+
+  // Immediately respond to Flow
+  return Response.json({ success: true });
 }
