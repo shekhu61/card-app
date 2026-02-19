@@ -8,15 +8,13 @@ const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 const FLOW_SECRET = process.env.FLOW_SECRET;
 
 if (!SHOP || !ACCESS_TOKEN) {
-  throw new Error("❌ Missing Shopify environment variables");
+  throw new Error("Missing Shopify environment variables");
 }
 
 /* ========================================================
    LOGIN TO REWARDS API
 ======================================================== */
 async function login() {
-  console.log("🔐 Logging into Rewards API");
-
   const res = await fetch(
     "https://stg-rewardsapi.centerforautism.com/Authentication/Login",
     {
@@ -29,15 +27,13 @@ async function login() {
     }
   );
 
-  const text = await res.text();
-  if (!text) throw new Error("❌ Empty login response");
+  const data = await res.json();
 
-  const data = JSON.parse(text);
-  if (!data?.token) throw new Error("❌ Rewards login failed");
+  if (!data || !data.token) {
+    throw new Error("Rewards login failed");
+  }
 
   setToken(data.token, 3600);
-  console.log("✅ Rewards token stored");
-
   return data.token;
 }
 
@@ -53,39 +49,37 @@ async function fetchWithAuth(url) {
   });
 
   if (res.status === 401) {
-    console.log("🔄 Rewards token expired, re-login");
     token = await login();
     res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
     });
   }
 
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
+  return res.json();
 }
 
 /* ========================================================
-   FETCH ALL EMPLOYEES (PAGINATED)
+   FETCH ALL EMPLOYEES
 ======================================================== */
 async function fetchAllEmployees(pageSize = 20) {
   let page = 1;
   let hasMore = true;
-  let employees = [];
+  const employees = [];
 
   while (hasMore) {
     const url =
-      `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/EmployeeDetails` +
+      "https://stg-rewardsapi.centerforautism.com/CardShopWrapper/EmployeeDetails" +
       `?PageNumber=${page}&PageSize=${pageSize}&FromDate=2019-01-01&ToDate=2026-12-31`;
 
     const res = await fetchWithAuth(url);
 
-    const records = Array.isArray(res?.data)
+    const records = Array.isArray(res && res.data)
       ? res.data
       : Array.isArray(res)
       ? res
       : [];
 
-    employees.push(...records);
+    employees.push.apply(employees, records);
 
     if (records.length < pageSize) {
       hasMore = false;
@@ -100,7 +94,7 @@ async function fetchAllEmployees(pageSize = 20) {
 /* ========================================================
    SHOPIFY GRAPHQL HELPER
 ======================================================== */
-async function shopifyGraphQL(query, variables = {}) {
+async function shopifyGraphQL(query, variables) {
   const res = await fetch(
     `https://${SHOP}/admin/api/2024-01/graphql.json`,
     {
@@ -109,7 +103,7 @@ async function shopifyGraphQL(query, variables = {}) {
         "Content-Type": "application/json",
         "X-Shopify-Access-Token": ACCESS_TOKEN,
       },
-      body: JSON.stringify({ query, variables }),
+      body: JSON.stringify({ query: query, variables: variables || {} }),
     }
   );
 
@@ -117,137 +111,85 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 /* ========================================================
+   CHECK IF CUSTOMER EXISTS
+======================================================== */
+async function getCustomerByEmail(email) {
+  const query = `
+    query {
+      customers(first: 1, query: "email:${email}") {
+        edges {
+          node {
+            id
+          }
+        }
+      }
+    }
+  `;
+
+  const result = await shopifyGraphQL(query);
+
+  const edges =
+    result &&
+    result.data &&
+    result.data.customers &&
+    result.data.customers.edges;
+
+  if (edges && edges.length > 0) {
+    return edges[0].node;
+  }
+
+  return null;
+}
+
+/* ========================================================
    REMIX ACTION — SHOPIFY FLOW ENTRY POINT
 ======================================================== */
 export async function action({ request }) {
-  console.log("🚀 Shopify Flow → Rewards Sync Triggered");
+  console.log("Rewards sync running");
 
-  /* =========================
-     SECURITY CHECK
-     ========================= */
-  const body = await request.json();
+  try {
+    const body = await request.json();
 
-  if (body?.secret !== FLOW_SECRET) {
-    console.log("❌ Unauthorized Flow request");
-    return new Response("Unauthorized", { status: 401 });
-  }
-
-  console.log("✅ Flow authorized");
-
-  /* =========================
-     FETCH EMPLOYEES
-     ========================= */
-  const employees = await fetchAllEmployees();
-
-
-  const results = [];
-
-  /* =========================
-     CREATE SHOPIFY CUSTOMERS
-     ========================= */
-  for (const emp of employees) {
-    const {
-      firstName,
-      lastName,
-      emailAddress,
-      employeeID,
-    } = emp;
-
-    if (!emailAddress) {
-      results.push({
-        status: "skipped",
-        reason: "Missing email",
-      });
-      continue;
+    if (!body || body.secret !== FLOW_SECRET) {
+      return new Response("Unauthorized", { status: 401 });
     }
 
-    try {
+    const employees = await fetchAllEmployees();
+
+    for (let i = 0; i < employees.length; i++) {
+      const emp = employees[i];
+
+      if (!emp || !emp.emailAddress) continue;
+
+      const existing = await getCustomerByEmail(emp.emailAddress);
+
+      if (existing) continue;
+
       const mutation = `
-        mutation createCustomer($input: CustomerInput!) {
-          customerCreate(input: $input) {
-            customer {
-              id
-              email
-            }
-            userErrors {
-              field
-              message
-            }
+        mutation {
+          customerCreate(input: {
+            firstName: "${emp.firstName || ""}"
+            lastName: "${emp.lastName || ""}"
+            email: "${emp.emailAddress}"
+            tags: ["pts"]
+            metafields: [{
+              namespace: "custom"
+              key: "employeeid"
+              type: "single_line_text_field"
+              value: "${emp.employeeID || ""}"
+            }]
+          }) {
+            customer { id }
+            userErrors { field message }
           }
         }
       `;
 
-      const input = {
-        firstName,
-        lastName,
-        email: emailAddress,
-        tags: ["pts"],
-        metafields: [
-          {
-            namespace: "custom",
-            key: "employeeid",
-            type: "single_line_text_field",
-            value: String(employeeID),
-          },
-        ],
-      };
-
-      const result = await shopifyGraphQL(mutation, { input });
-
-      /* ===== GRAPHQL HARD FAIL ===== */
-      if (result.errors) {
-        console.error("❌ Shopify GraphQL error:", result.errors);
-
-        results.push({
-          email: emailAddress,
-          status: "failed",
-          errors: result.errors,
-        });
-        continue;
-      }
-
-      const createResult = result.data?.customerCreate;
-
-      if (!createResult) {
-        results.push({
-          email: emailAddress,
-          status: "failed",
-          error: "customerCreate missing in response",
-        });
-        continue;
-      }
-
-      if (createResult.userErrors.length > 0) {
-        results.push({
-          email: emailAddress,
-          status: "failed",
-          errors: createResult.userErrors,
-        });
-      } else {
-        results.push({
-          email: emailAddress,
-          status: "created",
-          shopifyCustomerId: createResult.customer.id,
-        });
-      }
-    } catch (error) {
-      console.error("❌ Unexpected error:", error);
-
-      results.push({
-        email: emailAddress,
-        status: "error",
-        error: error.message,
-      });
+      await shopifyGraphQL(mutation);
     }
-  }
 
-  /* =========================
-     FINAL RESPONSE
-     ========================= */
-  return Response.json({
-    success: true,
-    totalEmployees: employees.length,
-    totalProcessed: results.length,
-    results,
-  });
+    return Response.json({ success: true });
+  } catch (err) {
+    return Response.json({ success: true });
+  }
 }
