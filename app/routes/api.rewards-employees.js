@@ -28,17 +28,14 @@ async function login() {
   );
 
   const data = await res.json();
-
-  if (!data || !data.token) {
-    throw new Error("Rewards login failed");
-  }
+  if (!data || !data.token) throw new Error("Login failed");
 
   setToken(data.token, 3600);
   return data.token;
 }
 
 /* ========================================================
-   SAFE FETCH WITH AUTO TOKEN REFRESH
+   SAFE FETCH
 ======================================================== */
 async function fetchWithAuth(url) {
   let token = getToken();
@@ -61,7 +58,7 @@ async function fetchWithAuth(url) {
 /* ========================================================
    FETCH ALL EMPLOYEES
 ======================================================== */
-async function fetchAllEmployees(pageSize = 20) {
+async function fetchAllEmployees(pageSize = 100) {
   let page = 1;
   let hasMore = true;
   const employees = [];
@@ -72,27 +69,19 @@ async function fetchAllEmployees(pageSize = 20) {
       `?PageNumber=${page}&PageSize=${pageSize}&FromDate=2019-01-01&ToDate=2026-12-31`;
 
     const res = await fetchWithAuth(url);
+    const records = Array.isArray(res?.data) ? res.data : [];
 
-    const records = Array.isArray(res && res.data)
-      ? res.data
-      : Array.isArray(res)
-      ? res
-      : [];
+    employees.push(...records);
 
-    employees.push.apply(employees, records);
-
-    if (records.length < pageSize) {
-      hasMore = false;
-    } else {
-      page++;
-    }
+    if (records.length < pageSize) hasMore = false;
+    else page++;
   }
 
   return employees;
 }
 
 /* ========================================================
-   SHOPIFY GRAPHQL HELPER
+   SHOPIFY GRAPHQL
 ======================================================== */
 async function shopifyGraphQL(query, variables) {
   const res = await fetch(
@@ -103,7 +92,7 @@ async function shopifyGraphQL(query, variables) {
         "Content-Type": "application/json",
         "X-Shopify-Access-Token": ACCESS_TOKEN,
       },
-      body: JSON.stringify({ query: query, variables: variables || {} }),
+      body: JSON.stringify({ query, variables }),
     }
   );
 
@@ -111,85 +100,107 @@ async function shopifyGraphQL(query, variables) {
 }
 
 /* ========================================================
-   CHECK IF CUSTOMER EXISTS
+   FETCH EXISTING SHOPIFY CUSTOMERS (TAG: pts)
 ======================================================== */
-async function getCustomerByEmail(email) {
-  const query = `
-    query {
-      customers(first: 1, query: "email:${email}") {
-        edges {
-          node {
-            id
+async function fetchExistingCustomers() {
+  let hasNextPage = true;
+  let cursor = null;
+  const existingEmails = new Set();
+
+  while (hasNextPage) {
+    const query = `
+      query ($cursor: String) {
+        customers(first: 250, after: $cursor, query: "tag:pts") {
+          edges {
+            cursor
+            node { email }
+          }
+          pageInfo {
+            hasNextPage
           }
         }
+      }
+    `;
+
+    const result = await shopifyGraphQL(query, { cursor });
+
+    const edges = result.data.customers.edges;
+
+    edges.forEach(edge => {
+      if (edge.node.email) {
+        existingEmails.add(edge.node.email.toLowerCase());
+      }
+    });
+
+    hasNextPage = result.data.customers.pageInfo.hasNextPage;
+    cursor = hasNextPage ? edges[edges.length - 1].cursor : null;
+  }
+
+  return existingEmails;
+}
+
+/* ========================================================
+   CREATE CUSTOMERS IN BATCH
+======================================================== */
+async function createCustomersBatch(customers) {
+  const mutation = `
+    mutation customerCreate($input: CustomerInput!) {
+      customerCreate(input: $input) {
+        customer { id }
+        userErrors { message }
       }
     }
   `;
 
-  const result = await shopifyGraphQL(query);
-
-  const edges =
-    result &&
-    result.data &&
-    result.data.customers &&
-    result.data.customers.edges;
-
-  if (edges && edges.length > 0) {
-    return edges[0].node;
+  for (let i = 0; i < customers.length; i++) {
+    await shopifyGraphQL(mutation, { input: customers[i] });
   }
-
-  return null;
 }
 
 /* ========================================================
-   REMIX ACTION — SHOPIFY FLOW ENTRY POINT
+   FLOW ACTION
 ======================================================== */
 export async function action({ request }) {
   console.log("Rewards sync running");
 
   try {
     const body = await request.json();
-
     if (!body || body.secret !== FLOW_SECRET) {
       return new Response("Unauthorized", { status: 401 });
     }
 
     const employees = await fetchAllEmployees();
+    const existingEmails = await fetchExistingCustomers();
 
-    for (let i = 0; i < employees.length; i++) {
-      const emp = employees[i];
+    const customersToCreate = [];
 
-      if (!emp || !emp.emailAddress) continue;
+    for (let emp of employees) {
+      if (!emp.emailAddress) continue;
 
-      const existing = await getCustomerByEmail(emp.emailAddress);
+      const email = emp.emailAddress.toLowerCase();
 
-      if (existing) continue;
+      if (existingEmails.has(email)) continue;
 
-      const mutation = `
-        mutation {
-          customerCreate(input: {
-            firstName: "${emp.firstName || ""}"
-            lastName: "${emp.lastName || ""}"
-            email: "${emp.emailAddress}"
-            tags: ["pts"]
-            metafields: [{
-              namespace: "custom"
-              key: "employeeid"
-              type: "single_line_text_field"
-              value: "${emp.employeeID || ""}"
-            }]
-          }) {
-            customer { id }
-            userErrors { field message }
-          }
-        }
-      `;
-
-      await shopifyGraphQL(mutation);
+      customersToCreate.push({
+        firstName: emp.firstName || "",
+        lastName: emp.lastName || "",
+        email: email,
+        tags: ["pts"],
+        metafields: [
+          {
+            namespace: "custom",
+            key: "employeeid",
+            type: "single_line_text_field",
+            value: String(emp.employeeID || ""),
+          },
+        ],
+      });
     }
 
+    await createCustomersBatch(customersToCreate);
+
     return Response.json({ success: true });
-  } catch (err) {
+  } catch (e) {
     return Response.json({ success: true });
   }
 }
