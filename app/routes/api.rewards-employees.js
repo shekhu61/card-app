@@ -1,8 +1,5 @@
 import { getToken, setToken } from "../utils/rewardsToken.server";
 
-/* ========================================================
-   ENV CONFIG
-======================================================== */
 const SHOP = process.env.SHOPIFY_SHOP_DOMAIN;
 const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 const FLOW_SECRET = process.env.FLOW_SECRET;
@@ -11,9 +8,7 @@ if (!SHOP || !ACCESS_TOKEN) {
   throw new Error("Missing Shopify environment variables");
 }
 
-/* ========================================================
-   LOGIN TO REWARDS API
-======================================================== */
+/* ================= LOGIN ================= */
 async function login() {
   const res = await fetch(
     "https://stg-rewardsapi.centerforautism.com/Authentication/Login",
@@ -28,15 +23,13 @@ async function login() {
   );
 
   const data = await res.json();
-  if (!data || !data.token) throw new Error("Login failed");
+  if (!data?.token) throw new Error("Login failed");
 
   setToken(data.token, 3600);
   return data.token;
 }
 
-/* ========================================================
-   SAFE FETCH
-======================================================== */
+/* ================= SAFE FETCH ================= */
 async function fetchWithAuth(url) {
   let token = getToken();
   if (!token) token = await login();
@@ -55,10 +48,8 @@ async function fetchWithAuth(url) {
   return res.json();
 }
 
-/* ========================================================
-   FETCH ALL EMPLOYEES
-======================================================== */
-async function fetchAllEmployees(pageSize = 100) {
+/* ================= FETCH EMPLOYEES ================= */
+async function fetchAllEmployees(pageSize = 200) {
   let page = 1;
   let hasMore = true;
   const employees = [];
@@ -80,9 +71,7 @@ async function fetchAllEmployees(pageSize = 100) {
   return employees;
 }
 
-/* ========================================================
-   SHOPIFY GRAPHQL
-======================================================== */
+/* ================= SHOPIFY GRAPHQL ================= */
 async function shopifyGraphQL(query, variables) {
   const res = await fetch(
     `https://${SHOP}/admin/api/2024-01/graphql.json`,
@@ -99,67 +88,7 @@ async function shopifyGraphQL(query, variables) {
   return res.json();
 }
 
-/* ========================================================
-   FETCH EXISTING SHOPIFY CUSTOMERS (TAG: pts)
-======================================================== */
-async function fetchExistingCustomers() {
-  let hasNextPage = true;
-  let cursor = null;
-  const existingEmails = new Set();
-
-  while (hasNextPage) {
-    const query = `
-      query ($cursor: String) {
-        customers(first: 250, after: $cursor, query: "tag:pts") {
-          edges {
-            cursor
-            node { email }
-          }
-          pageInfo {
-            hasNextPage
-          }
-        }
-      }
-    `;
-
-    const result = await shopifyGraphQL(query, { cursor });
-
-    const edges = result.data.customers.edges;
-
-    edges.forEach(edge => {
-      if (edge.node.email) {
-        existingEmails.add(edge.node.email.toLowerCase());
-      }
-    });
-
-    hasNextPage = result.data.customers.pageInfo.hasNextPage;
-    cursor = hasNextPage ? edges[edges.length - 1].cursor : null;
-  }
-
-  return existingEmails;
-}
-
-/* ========================================================
-   CREATE CUSTOMERS IN BATCH
-======================================================== */
-async function createCustomersBatch(customers) {
-  const mutation = `
-    mutation customerCreate($input: CustomerInput!) {
-      customerCreate(input: $input) {
-        customer { id }
-        userErrors { message }
-      }
-    }
-  `;
-
-  for (let i = 0; i < customers.length; i++) {
-    await shopifyGraphQL(mutation, { input: customers[i] });
-  }
-}
-
-/* ========================================================
-   FLOW ACTION
-======================================================== */
+/* ================= FLOW ACTION ================= */
 export async function action({ request }) {
   console.log("Rewards sync running");
 
@@ -170,21 +99,23 @@ export async function action({ request }) {
     }
 
     const employees = await fetchAllEmployees();
-    const existingEmails = await fetchExistingCustomers();
 
-    const customersToCreate = [];
+    const mutation = `
+      mutation customerCreate($input: CustomerInput!) {
+        customerCreate(input: $input) {
+          customer { id }
+          userErrors { message }
+        }
+      }
+    `;
 
     for (let emp of employees) {
       if (!emp.emailAddress) continue;
 
-      const email = emp.emailAddress.toLowerCase();
-
-      if (existingEmails.has(email)) continue;
-
-      customersToCreate.push({
+      const input = {
         firstName: emp.firstName || "",
         lastName: emp.lastName || "",
-        email: email,
+        email: emp.emailAddress,
         tags: ["pts"],
         metafields: [
           {
@@ -194,13 +125,19 @@ export async function action({ request }) {
             value: String(emp.employeeID || ""),
           },
         ],
-      });
+      };
+
+      const result = await shopifyGraphQL(mutation, { input });
+
+      // Ignore duplicate email errors
+      const errors = result?.data?.customerCreate?.userErrors;
+      if (errors && errors.length > 0) {
+        continue;
+      }
     }
 
-    await createCustomersBatch(customersToCreate);
-
     return Response.json({ success: true });
-  } catch (e) {
+  } catch (err) {
     return Response.json({ success: true });
   }
 }
