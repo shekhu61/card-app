@@ -67,12 +67,14 @@ async function fetchWithAuth(url) {
 /* ========================================================
    FETCH ALL EMPLOYEES (PAGINATED)
 ======================================================== */
-async function fetchAllEmployees(pageSize = 20) {
+async function fetchAllEmployees(pageSize = 50) {
   let page = 1;
   let hasMore = true;
   let employees = [];
 
   while (hasMore) {
+    console.log(`📄 Fetching page ${page}`);
+
     const url =
       `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/EmployeeDetails` +
       `?PageNumber=${page}&PageSize=${pageSize}&FromDate=2019-01-01&ToDate=2026-12-31`;
@@ -94,6 +96,7 @@ async function fetchAllEmployees(pageSize = 20) {
     }
   }
 
+  console.log(`👥 Total employees fetched: ${employees.length}`);
   return employees;
 }
 
@@ -117,62 +120,65 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 /* ========================================================
-   REMIX ACTION — SHOPIFY FLOW ENTRY POINT
+   CHECK IF CUSTOMER EXISTS
 ======================================================== */
-export async function action({ request }) {
-  console.log("🚀 Shopify Flow → Rewards Sync Triggered");
+async function getCustomerByEmail(email) {
+  const query = `
+    query getCustomer($query: String!) {
+      customers(first: 1, query: $query) {
+        edges {
+          node {
+            id
+            email
+          }
+        }
+      }
+    }
+  `;
 
-  /* =========================
-     SECURITY CHECK
-     ========================= */
-  const body = await request.json();
+  const result = await shopifyGraphQL(query, {
+    query: `email:${email}`,
+  });
 
-  if (body?.secret !== FLOW_SECRET) {
-    console.log("❌ Unauthorized Flow request");
-    return new Response("Unauthorized", { status: 401 });
-  }
+  return result?.data?.customers?.edges?.[0]?.node || null;
+}
 
-  console.log("✅ Flow authorized");
+/* ========================================================
+   BACKGROUND SYNC FUNCTION
+======================================================== */
+async function runEmployeeSync() {
+  console.log("🔄 Background sync started");
 
-  /* =========================
-     FETCH EMPLOYEES
-     ========================= */
   const employees = await fetchAllEmployees();
 
+  let created = 0;
+  let skipped = 0;
+  let failed = 0;
 
-  const results = [];
-
-  /* =========================
-     CREATE SHOPIFY CUSTOMERS
-     ========================= */
   for (const emp of employees) {
-    const {
-      firstName,
-      lastName,
-      emailAddress,
-      employeeID,
-    } = emp;
+    const { firstName, lastName, emailAddress, employeeID } = emp;
 
     if (!emailAddress) {
-      results.push({
-        status: "skipped",
-        reason: "Missing email",
-      });
+      console.log("⏭ Skipped (missing email)");
+      skipped++;
       continue;
     }
 
     try {
+      // ✅ Skip if exists
+      const existingCustomer = await getCustomerByEmail(emailAddress);
+
+      if (existingCustomer) {
+        console.log(`⏭ Already exists → ${emailAddress}`);
+        skipped++;
+        continue;
+      }
+
       const mutation = `
         mutation createCustomer($input: CustomerInput!) {
           customerCreate(input: $input) {
-            customer {
-              id
-              email
-            }
-            userErrors {
-              field
-              message
-            }
+            customer { id email }
+            userErrors { field message }
           }
         }
       `;
@@ -194,60 +200,63 @@ export async function action({ request }) {
 
       const result = await shopifyGraphQL(mutation, { input });
 
-      /* ===== GRAPHQL HARD FAIL ===== */
       if (result.errors) {
-        console.error("❌ Shopify GraphQL error:", result.errors);
-
-        results.push({
-          email: emailAddress,
-          status: "failed",
-          errors: result.errors,
-        });
+        console.log("❌ GraphQL error:", result.errors);
+        failed++;
         continue;
       }
 
-      const createResult = result.data?.customerCreate;
+      const userErrors = result?.data?.customerCreate?.userErrors;
 
-      if (!createResult) {
-        results.push({
-          email: emailAddress,
-          status: "failed",
-          error: "customerCreate missing in response",
-        });
-        continue;
-      }
-
-      if (createResult.userErrors.length > 0) {
-        results.push({
-          email: emailAddress,
-          status: "failed",
-          errors: createResult.userErrors,
-        });
+      if (userErrors?.length > 0) {
+        console.log("⚠️ User error:", userErrors);
+        failed++;
       } else {
-        results.push({
-          email: emailAddress,
-          status: "created",
-          shopifyCustomerId: createResult.customer.id,
-        });
+        console.log(`✅ Created → ${emailAddress}`);
+        created++;
       }
-    } catch (error) {
-      console.error("❌ Unexpected error:", error);
-
-      results.push({
-        email: emailAddress,
-        status: "error",
-        error: error.message,
-      });
+    } catch (err) {
+      console.log("❌ Unexpected error:", err.message);
+      failed++;
     }
   }
 
-  /* =========================
-     FINAL RESPONSE
-     ========================= */
-  return Response.json({
-    success: true,
-    totalEmployees: employees.length,
-    totalProcessed: results.length,
-    results,
+  console.log("🎉 Sync Completed");
+  console.log("📊 Summary:", {
+    total: employees.length,
+    created,
+    skipped,
+    failed,
   });
+}
+
+/* ========================================================
+   REMIX ACTION — SHOPIFY FLOW ENTRY POINT
+======================================================== */
+export async function action({ request }) {
+  console.log("🚀 Shopify Flow Triggered");
+
+  const body = await request.json();
+
+  if (body?.secret !== FLOW_SECRET) {
+    console.log("❌ Unauthorized request");
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  console.log("✅ Flow authorized");
+
+  // 🔥 Immediately return success to prevent retry
+  const response = Response.json({
+    success: true,
+    message: "Employee sync started in background",
+  });
+
+  // 🚀 Run background job
+  setTimeout(() => {
+    runEmployeeSync().catch((err) => {
+      console.error("🔥 Background sync crashed:", err);
+    });
+  }, 0);
+
+  return response;
 }
