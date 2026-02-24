@@ -192,7 +192,7 @@ export async function action({ request }) {
                   },
                 },
               },
-              usageLimit: false,
+              usageLimit: 1000,
               appliesOncePerCustomer: flase,
             },
           },
