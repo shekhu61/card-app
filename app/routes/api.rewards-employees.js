@@ -65,7 +65,7 @@ async function fetchWithAuth(url) {
 }
 
 /* ========================================================
-   FETCH ALL EMPLOYEES (PAGINATED)
+   FETCH ALL EMPLOYEES
 ======================================================== */
 async function fetchAllEmployees(pageSize = 50) {
   let page = 1;
@@ -73,8 +73,6 @@ async function fetchAllEmployees(pageSize = 50) {
   let employees = [];
 
   while (hasMore) {
-    console.log(`📄 Fetching page ${page}`);
-
     const url =
       `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/EmployeeDetails` +
       `?PageNumber=${page}&PageSize=${pageSize}&FromDate=2019-01-01&ToDate=2026-12-31`;
@@ -120,7 +118,7 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 /* ========================================================
-   CHECK IF CUSTOMER EXISTS
+   GET CUSTOMER BY EMAIL
 ======================================================== */
 async function getCustomerByEmail(email) {
   const query = `
@@ -130,6 +128,7 @@ async function getCustomerByEmail(email) {
           node {
             id
             email
+            tags
           }
         }
       }
@@ -144,7 +143,70 @@ async function getCustomerByEmail(email) {
 }
 
 /* ========================================================
-   BACKGROUND SYNC FUNCTION
+   UPDATE CUSTOMER
+======================================================== */
+async function updateCustomer(customerId, existingTags = [], employeeID) {
+  const mutation = `
+    mutation updateCustomer($input: CustomerInput!) {
+      customerUpdate(input: $input) {
+        customer { id email tags }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const tagsSet = new Set(existingTags || []);
+  tagsSet.add("pts");
+
+  const input = {
+    id: customerId,
+    tags: Array.from(tagsSet),
+    metafields: [
+      {
+        namespace: "custom",
+        key: "employeeid",
+        type: "single_line_text_field",
+        value: String(employeeID),
+      },
+    ],
+  };
+
+  return shopifyGraphQL(mutation, { input });
+}
+
+/* ========================================================
+   CREATE CUSTOMER
+======================================================== */
+async function createCustomer(firstName, lastName, email, employeeID) {
+  const mutation = `
+    mutation createCustomer($input: CustomerInput!) {
+      customerCreate(input: $input) {
+        customer { id email }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const input = {
+    firstName,
+    lastName,
+    email,
+    tags: ["pts"],
+    metafields: [
+      {
+        namespace: "custom",
+        key: "employeeid",
+        type: "single_line_text_field",
+        value: String(employeeID),
+      },
+    ],
+  };
+
+  return shopifyGraphQL(mutation, { input });
+}
+
+/* ========================================================
+   BACKGROUND SYNC
 ======================================================== */
 async function runEmployeeSync() {
   console.log("🔄 Background sync started");
@@ -152,86 +214,53 @@ async function runEmployeeSync() {
   const employees = await fetchAllEmployees();
 
   let created = 0;
-  let skipped = 0;
+  let updated = 0;
   let failed = 0;
 
   for (const emp of employees) {
     const { firstName, lastName, emailAddress, employeeID } = emp;
 
-    if (!emailAddress) {
-      console.log("⏭ Skipped (missing email)");
-      skipped++;
-      continue;
-    }
+    if (!emailAddress) continue;
 
     try {
-      // ✅ Skip if exists
       const existingCustomer = await getCustomerByEmail(emailAddress);
 
       if (existingCustomer) {
-        console.log(`⏭ Already exists → ${emailAddress}`);
-        skipped++;
+        const result = await updateCustomer(
+          existingCustomer.id,
+          existingCustomer.tags,
+          employeeID
+        );
+
+        const errors = result?.data?.customerUpdate?.userErrors;
+        if (errors?.length) failed++;
+        else updated++;
+
         continue;
       }
 
-      const mutation = `
-        mutation createCustomer($input: CustomerInput!) {
-          customerCreate(input: $input) {
-            customer { id email }
-            userErrors { field message }
-          }
-        }
-      `;
-
-      const input = {
+      const result = await createCustomer(
         firstName,
         lastName,
-        email: emailAddress,
-        tags: ["pts"],
-        metafields: [
-          {
-            namespace: "custom",
-            key: "employeeid",
-            type: "single_line_text_field",
-            value: String(employeeID),
-          },
-        ],
-      };
+        emailAddress,
+        employeeID
+      );
 
-      const result = await shopifyGraphQL(mutation, { input });
+      const errors = result?.data?.customerCreate?.userErrors;
+      if (errors?.length) failed++;
+      else created++;
 
-      if (result.errors) {
-        console.log("❌ GraphQL error:", result.errors);
-        failed++;
-        continue;
-      }
-
-      const userErrors = result?.data?.customerCreate?.userErrors;
-
-      if (userErrors?.length > 0) {
-        console.log("⚠️ User error:", userErrors);
-        failed++;
-      } else {
-        console.log(`✅ Created → ${emailAddress}`);
-        created++;
-      }
     } catch (err) {
-      console.log("❌ Unexpected error:", err.message);
+      console.error("❌ Sync error:", err.message);
       failed++;
     }
   }
 
-  console.log("🎉 Sync Completed");
-  console.log("📊 Summary:", {
-    total: employees.length,
-    created,
-    skipped,
-    failed,
-  });
+  console.log("🎉 Sync Completed", { created, updated, failed });
 }
 
 /* ========================================================
-   REMIX ACTION — SHOPIFY FLOW ENTRY POINT
+   REMIX ACTION (SHOPIFY FLOW)
 ======================================================== */
 export async function action({ request }) {
   console.log("🚀 Shopify Flow Triggered");
@@ -239,23 +268,25 @@ export async function action({ request }) {
   const body = await request.json();
 
   if (body?.secret !== FLOW_SECRET) {
-    console.log("❌ Unauthorized request");
     return new Response("Unauthorized", { status: 401 });
   }
 
-  console.log("✅ Flow authorized");
+  // Immediately respond to prevent Shopify Flow retry
+  const response = new Response(
+    JSON.stringify({
+      success: true,
+      message: "Employee sync started in background",
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }
+  );
 
-  // 🔥 Immediately return success to prevent retry
-  const response = Response.json({
-    success: true,
-    message: "Employee sync started in background",
-  });
-
-  // 🚀 Run background job
   setTimeout(() => {
-    runEmployeeSync().catch((err) => {
-      console.error("🔥 Background sync crashed:", err);
-    });
+    runEmployeeSync().catch((err) =>
+      console.error("🔥 Background crashed:", err)
+    );
   }, 0);
 
   return response;

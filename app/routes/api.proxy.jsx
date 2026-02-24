@@ -1,5 +1,5 @@
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server"; // Make sure this path points to your Prisma instance
+import prisma from "../db.server";
 
 /* ======================================================
    HARD-CODED REWARDS API CONFIG (NO ENV)
@@ -22,15 +22,15 @@ export async function action({ request }) {
     ---------------------------------------------- */
     const { employeeId, email } = await request.json();
 
-    console.log("🆔 Employee ID:", employeeId);
-    console.log("📧 Customer Email:", email);
-
     if (!employeeId || !email) {
       return Response.json(
         { error: "Employee ID or email missing" },
         { status: 400 }
       );
     }
+
+    console.log("🆔 Employee ID:", employeeId);
+    console.log("📧 Customer Email:", email);
 
     /* ----------------------------------------------
        LOGIN TO REWARDS API
@@ -54,30 +54,6 @@ export async function action({ request }) {
 
     const pointsData = await pointsRes.json();
 
-    console.log("✅ Employee Points Result:", pointsData);
-
-    /* ----------------------------------------------
-       FETCH DEFAULT EMPLOYEE (ID = 18237) POINTS
-    ---------------------------------------------- */
-    const defaultEmployeeRes = await fetch(
-      `${BASE_URL}/CardShopWrapper/GetEmployeeAddedPointsById?EmployeeID=${employeeId}`,
-      {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
-
-    if (!defaultEmployeeRes.ok) {
-      throw new Error("Default employee points API failed");
-    }
-
-    const defaultEmployeePoints = await defaultEmployeeRes.json();
-
-    console.log(
-      "📊 Default Employee (ID=18237) Points:",
-      defaultEmployeePoints
-    );
-
     const {
       employeeID,
       employeeName,
@@ -86,6 +62,8 @@ export async function action({ request }) {
       redeemedPoints,
       addedPoints,
     } = pointsData;
+
+    console.log("✅ Employee Points:", pointsData);
 
     /* ----------------------------------------------
        FETCH ACTIVE REWARD RULE FROM DB
@@ -101,13 +79,17 @@ export async function action({ request }) {
 
     const { pointsPerUnit, currencyUnit } = rewardRule;
 
-    // Calculate coins / discount amount based on reward rule
-    const coins = ((availablePoints || 0) * currencyUnit) / pointsPerUnit;
+    const coins =
+      ((availablePoints || 0) * currencyUnit) / pointsPerUnit;
 
-    console.log(`💰 Discount amount calculated from reward rule: $${coins}`);
+    if (coins <= 0) {
+      throw new Error("No discount available for this employee");
+    }
+
+    console.log(`💰 Order Discount Amount: $${coins}`);
 
     /* ----------------------------------------------
-       FETCH SHOPIFY CUSTOMER ID BY EMAIL
+       FETCH SHOPIFY CUSTOMER ID
     ---------------------------------------------- */
     const customerRes = await admin.graphql(
       `
@@ -121,18 +103,25 @@ export async function action({ request }) {
     );
 
     const customerData = await customerRes.json();
-    const shopifyCustomerId = customerData.data.customers.nodes[0]?.id;
+    const shopifyCustomerId =
+      customerData.data.customers.nodes[0]?.id;
 
     if (!shopifyCustomerId) {
       throw new Error("Shopify customer not found");
     }
 
     /* ----------------------------------------------
-       DISCOUNT CODE LOGIC
+       DISCOUNT CODE NAME
     ---------------------------------------------- */
-    const discountCode = `PTS-${email.split("@")[0].toUpperCase()}`;
+    const discountCode = `PTS-${email
+      .split("@")[0]
+      .toUpperCase()}`;
+
     console.log("🎟️ Discount Code:", discountCode);
 
+    /* ----------------------------------------------
+       SEARCH EXISTING DISCOUNT
+    ---------------------------------------------- */
     const discountSearchRes = await admin.graphql(
       `
       query ($query: String!) {
@@ -163,8 +152,11 @@ export async function action({ request }) {
       }
     }
 
+    /* =====================================================
+       CREATE ORDER DISCOUNT (NO LIMITS)
+    ===================================================== */
     if (!discountNode) {
-      console.log("➕ Creating discount");
+      console.log("➕ Creating Order Discount");
 
       await admin.graphql(
         `
@@ -180,11 +172,13 @@ export async function action({ request }) {
               title: discountCode,
               code: discountCode,
               startsAt: new Date().toISOString(),
+
               customerSelection: {
                 customers: { add: [shopifyCustomerId] },
               },
+
+              // ✅ ORDER DISCOUNT STRUCTURE
               customerGets: {
-                items: { all: true },
                 value: {
                   discountAmount: {
                     amount: String(coins),
@@ -192,14 +186,24 @@ export async function action({ request }) {
                   },
                 },
               },
-              usageLimit: 1,
-              appliesOncePerCustomer: true,
+
+              appliesTo: {
+                all: true,
+              },
+
+              // ❌ No usageLimit
+              // ❌ No appliesOncePerCustomer
             },
           },
         }
       );
-    } else {
-      console.log("✏️ Updating discount");
+    }
+
+    /* =====================================================
+       UPDATE ORDER DISCOUNT
+    ===================================================== */
+    else {
+      console.log("✏️ Updating Order Discount");
 
       await admin.graphql(
         `
@@ -214,13 +218,15 @@ export async function action({ request }) {
             id: discountNode.id,
             input: {
               customerGets: {
-                items: { all: true },
                 value: {
                   discountAmount: {
                     amount: String(coins),
                     appliesOnEachItem: false,
                   },
                 },
+              },
+              appliesTo: {
+                all: true,
               },
             },
           },
@@ -231,8 +237,6 @@ export async function action({ request }) {
     /* ----------------------------------------------
        UPDATE CUSTOMER METAFIELDS
     ---------------------------------------------- */
-    console.log("🧾 Updating customer metafields");
-
     await admin.graphql(
       `
       mutation ($input: CustomerInput!) {
@@ -271,19 +275,15 @@ export async function action({ request }) {
     ---------------------------------------------- */
     return Response.json({
       success: true,
-
       employeeID,
       employeeName,
-
       availablePoints,
       totalEarnedPoints,
       redeemedPoints,
       addedPoints,
-
       email,
       coins,
       discountCode,
-      defaultEmployeePoints,
     });
   } catch (error) {
     console.error("❌ Proxy Error:", error);
@@ -315,7 +315,6 @@ async function loginAndGetToken() {
   }
 
   const data = await res.json();
-  console.log("🔑 Token received");
 
   return data.token;
 }
