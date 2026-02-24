@@ -192,8 +192,8 @@ export async function action({ request }) {
                   },
                 },
               },
-              usageLimit: 1000,
-              appliesOncePerCustomer: flase,
+              usageLimit: 1,
+              appliesOncePerCustomer: true,
             },
           },
         }
