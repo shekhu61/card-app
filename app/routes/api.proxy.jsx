@@ -192,8 +192,8 @@ export async function action({ request }) {
                   },
                 },
               },
-              usageLimit: 1,
-              appliesOncePerCustomer: true,
+              usageLimit: 1000,
+              appliesOncePerCustomer: false,
             },
           },
         }

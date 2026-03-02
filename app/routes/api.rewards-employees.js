@@ -156,7 +156,7 @@ async function updateCustomer(customerId, existingTags = [], employeeID) {
   `;
 
   const tagsSet = new Set(existingTags || []);
-  tagsSet.add("pts");
+  tagsSet.add("pts"); // ensure pts tag exists
 
   const input = {
     id: customerId,
@@ -167,6 +167,12 @@ async function updateCustomer(customerId, existingTags = [], employeeID) {
         key: "employeeid",
         type: "single_line_text_field",
         value: String(employeeID),
+      },
+      {
+        namespace: "custom",
+        key: "office_location",
+        type: "single_line_text_field",
+        value: "US ME Portland ME",
       },
     ],
   };
@@ -198,6 +204,12 @@ async function createCustomer(firstName, lastName, email, employeeID) {
         key: "employeeid",
         type: "single_line_text_field",
         value: String(employeeID),
+      },
+      {
+        namespace: "custom",
+        key: "office_location",
+        type: "single_line_text_field",
+        value: "US ME Portland ME",
       },
     ],
   };
@@ -271,7 +283,6 @@ export async function action({ request }) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  // Immediately respond to prevent Shopify Flow retry
   const response = new Response(
     JSON.stringify({
       success: true,
