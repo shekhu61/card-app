@@ -45,7 +45,7 @@ const shopifyOrderId = rawOrder_Id.split("/").pop(); // 6851559817465
       return new Response("Invalid reward rule configuration", { status: 500 });
     }
 
-    const pointsPerDollar = currencyUnit / pointsPerUnit;
+    const pointsPerDollar = currencyUnit * pointsPerUnit;
     console.log("🎯 Reward Rule:", { pointsPerUnit, currencyUnit, pointsPerDollar });
 
     /* ================= CALCULATE POINTS ================= */
