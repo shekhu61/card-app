@@ -207,3 +207,6 @@ input[type="number"]::-webkit-outer-spin-button {
   color: #6d7175;
   font-size: 12px;
 }
+.Polaris-Icon__Svg{
+  display:none !important;
+}
