@@ -11,6 +11,7 @@ export async function loader() {
     return new Response(JSON.stringify(rule), {
       headers: { "Content-Type": "application/json" }
     });
+
   } catch (error) {
     console.error("❌ Loader error:", error);
     return new Response("Failed to load rule", { status: 500 });
@@ -20,17 +21,16 @@ export async function loader() {
 /* ================= SAVE RULE ================= */
 export async function action({ request }) {
   try {
-    // Authenticate admin (optional, keeps admin only)
     const { admin } = await authenticate.admin(request);
     if (!admin) throw new Error("Admin authentication failed");
 
-    // Parse request body
     const body = await request.json();
-    const pointsPerUnit = parseFloat(body.points);
-    const currencyUnit = parseFloat(body.dollar);
 
-    if (!pointsPerUnit || !currencyUnit) {
-      return new Response("Invalid points or dollar value", { status: 400 });
+    const basePoints = parseFloat(body.a); // "a"
+    const difference = parseFloat(body.d); // "d"
+
+    if (isNaN(basePoints) || isNaN(difference)) {
+      return new Response("Invalid values", { status: 400 });
     }
 
     // Deactivate old rules
@@ -39,11 +39,11 @@ export async function action({ request }) {
       data: { isActive: false }
     });
 
-    // Create new active rule
+    // Create new rule
     const rule = await prisma.rewardRule.create({
       data: {
-        pointsPerUnit,
-        currencyUnit,
+        basePoints,
+        difference,
         isActive: true
       }
     });
@@ -53,7 +53,7 @@ export async function action({ request }) {
     });
 
   } catch (error) {
-    console.error("❌ Rule Save Error:", error);
+    console.error("❌ Save error:", error);
     return new Response("Failed to save rule", { status: 500 });
   }
 }

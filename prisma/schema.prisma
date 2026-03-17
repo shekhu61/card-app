@@ -33,13 +33,11 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
-model RewardRule {
-  id             Int      @id @default(autoincrement())
-  pointsPerUnit  Float    // e.g. 5   (points)
-  currencyUnit   Float    // e.g. 1   (dollar)
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+model rewardRule {
+  id          String   @id @default(cuid())
+  basePoints  Float    // "a" → points for $1
+  difference  Float    // "d" → increment per slab
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
 }
-
 

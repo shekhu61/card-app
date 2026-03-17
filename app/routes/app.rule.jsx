@@ -1,93 +1,83 @@
 import { useEffect, useState } from "react";
-import { Page, Card, TextField, Button, Layout, Banner } from "@shopify/polaris";
 
-export default function RulePage() {
-  const [points, setPoints] = useState("");
-  const [dollar, setDollar] = useState("");
-  const [status, setStatus] = useState({ message: "", type: "" });
+export default function RupePage() {
+  const [a, setA] = useState("");
+  const [d, setD] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  // Load current rule from DB
+  /* ===== Fetch existing rule ===== */
   useEffect(() => {
-    fetch("/api/rule")
-      .then((res) => res.json())
-      .then((data) => {
+    async function fetchRule() {
+      try {
+        const res = await fetch("/api/point_rule");
+        const data = await res.json();
+
         if (data) {
-          setPoints(data.pointsPerUnit);
-          setDollar(data.currencyUnit);
+          setA(data.basePoints || "");
+          setD(data.difference || "");
         }
-      })
-      .catch(() => {
-        setStatus({ message: "Failed to load rule", type: "critical" });
-      });
+      } catch (err) {
+        console.error("Fetch error:", err);
+      }
+    }
+
+    fetchRule();
   }, []);
 
-  // Save rule
-  async function saveRule() {
-    setStatus({ message: "Saving...", type: "info" });
+  /* ===== Save rule ===== */
+  async function handleSave() {
+    setLoading(true);
 
     try {
-      const res = await fetch("/api/rule", {
+      const res = await fetch("/api/point_rule", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ points, dollar })
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          a,
+          d
+        })
       });
 
-      if (res.ok) {
-        setStatus({ message: "Saved successfully", type: "success" });
-      } else {
-        setStatus({ message: "Failed to save", type: "critical" });
+      if (!res.ok) {
+        throw new Error("Failed to save");
       }
+
+      alert("✅ Rule saved successfully");
     } catch (err) {
-      setStatus({ message: "Failed to save", type: "critical" });
+      console.error(err);
+      alert("❌ Error saving rule");
     }
+
+    setLoading(false);
   }
 
   return (
-    <Page title="Reward Conversion Rule">
-      <Layout>
-        <Layout.Section>
-          <Card sectioned>
-            {status.message && (
-              <Banner status={status.type} title={status.message} />
-            )}
+    <div style={{ padding: "20px" }}>
+      <h2>Reward Rule (Arithmetic Progression)</h2>
 
-            <div style={{ marginBottom: "16px" }}>
-              <TextField
-                label="Points"
-                type="number"
-                value={points}
-                onChange={(value) => setPoints(value)}
-                helpText="Number of points per currency unit"
-              />
-            </div>
+      <div style={{ marginBottom: "10px" }}>
+        <label>Points for $1 (a): </label>
+        <input
+          type="number"
+          value={a}
+          onChange={(e) => setA(e.target.value)}
+        />
+      </div>
 
-            <div style={{ marginBottom: "16px" }}>
-              <TextField
-                label="Dollar"
-                type="number"
-                value={dollar}
-                onChange={(value) => setDollar(value)}
-                helpText="Amount in dollars for conversion"
-              />
-            </div>
+      <div style={{ marginBottom: "10px" }}>
+        <label>Difference per $ (d): </label>
+        <input
+          type="number"
+          value={d}
+          onChange={(e) => setD(e.target.value)}
+        />
+      </div>
 
-            <div style={{ marginBottom: "16px" }}>
-              <Button primary onClick={saveRule}>
-                Save Rule
-              </Button>
-            </div>
-
-            {points && dollar && (
-              <div>
-                <p>
-                  Current rule: <strong>{points} points</strong> ={" "}
-                  <strong>{dollar} dollar</strong>
-                </p>
-              </div>
-            )}
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </Page>
+      <button onClick={handleSave} disabled={loading}>
+        {loading ? "Saving..." : "Save Rule"}
+      </button>
+    </div>
   );
 }

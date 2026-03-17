@@ -99,12 +99,38 @@ export async function action({ request }) {
       throw new Error("No active reward rule found");
     }
 
-    const { pointsPerUnit, currencyUnit } = rewardRule;
+   /* ----------------------------------------------
+   CALCULATE DISCOUNT USING AP (a, d)
+---------------------------------------------- */
 
-    // Calculate coins / discount amount based on reward rule
-    const coins = ((availablePoints || 0) * currencyUnit) / pointsPerUnit;
+const { basePoints: a, difference: d } = rewardRule;
 
-    console.log(`💰 Discount amount calculated from reward rule: $${coins}`);
+if (typeof a !== "number" || typeof d !== "number") {
+  throw new Error("Invalid reward rule configuration");
+}
+
+const points = Number(availablePoints) || 0;
+
+let slab = 0;
+
+// Step 1: Find base slab (n)
+if (points >= a) {
+  slab = Math.floor((points - a) / d) + 1;
+}
+
+// Step 2: Handle decimal threshold (like 2.75 → next slab)
+const currentSlabPoints = a + (slab - 1) * d;
+const remainingPoints = points - currentSlabPoints;
+
+if (remainingPoints >= d * 0.75) {
+  slab += 1;
+}
+
+// Step 3: Final discount (₹ / $ equivalent)
+const coins = Math.max(0, slab);
+
+console.log(`💰 AP Discount calculated: ${coins}`);
+
 
     /* ----------------------------------------------
        FETCH SHOPIFY CUSTOMER ID BY EMAIL
