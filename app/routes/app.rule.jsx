@@ -9,7 +9,7 @@ export default function RupePage() {
   useEffect(() => {
     async function fetchRule() {
       try {
-        const res = await fetch("/api/point_rule");
+        const res = await fetch("/api/rule");
         const data = await res.json();
 
         if (data) {
