@@ -29,7 +29,7 @@ export default function RupePage() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/point_rule", {
+      const res = await fetch("/api/rule", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
