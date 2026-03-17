@@ -39,18 +39,34 @@ const shopifyOrderId = rawOrder_Id.split("/").pop(); // 6851559817465
       return new Response("No active reward rule found", { status: 500 });
     }
 
-    const { pointsPerUnit, currencyUnit } = rewardRule;
+   /* ================= CALCULATE POINTS USING AP ================= */
 
-    if (pointsPerUnit <= 0 || currencyUnit <= 0) {
-      return new Response("Invalid reward rule configuration", { status: 500 });
-    }
+const { basePoints: a, difference: d } = rewardRule;
 
-    const pointsPerDollar = currencyUnit * pointsPerUnit;
-    console.log("🎯 Reward Rule:", { pointsPerUnit, currencyUnit, pointsPerDollar });
+if (typeof a !== "number" || typeof d !== "number") {
+  return new Response("Invalid reward rule configuration", { status: 500 });
+}
 
-    /* ================= CALCULATE POINTS ================= */
-    const pointsToRedeem = Math.round(discountAmount * pointsPerDollar);
-    console.log("🪙 Points to redeem:", { discountAmount, pointsPerDollar, pointsToRedeem });
+// discountAmount = number of dollars user used
+const n = Math.floor(discountAmount); // slab count
+
+if (n <= 0) {
+  return new Response("Invalid discount amount", { status: 400 });
+}
+
+// AP formula: total points for n dollars
+// Sn = n/2 * [2a + (n-1)d]
+const pointsToRedeem = Math.round(
+  (n / 2) * (2 * a + (n - 1) * d)
+);
+
+console.log("🪙 AP Redeem Calculation:", {
+  discountAmount,
+  slab: n,
+  basePoints: a,
+  difference: d,
+  pointsToRedeem
+});
 
     if (pointsToRedeem <= 0) {
       return new Response("Calculated points invalid", { status: 400 });
