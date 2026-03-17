@@ -55,7 +55,7 @@ export default function RupePage() {
 
   return (
     <div style={{ padding: "20px" }}>
-      <h2>Reward Rule (Arithmetic Progression)</h2>
+      <h2>Reward Rule</h2>
 
       <div style={{ marginBottom: "10px" }}>
         <label>Points for $1 (a): </label>
