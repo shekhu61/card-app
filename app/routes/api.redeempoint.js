@@ -40,25 +40,22 @@ const shopifyOrderId = rawOrder_Id.split("/").pop(); // 6851559817465
     }
 
    /* ================= CALCULATE POINTS USING AP ================= */
+/* ================= CALCULATE POINTS FROM DISCOUNT ================= */
 
-const { basePoints: a, difference: d } = rewardRule;
+const { basePoints: a } = rewardRule; // points per $1
 
-if (typeof a !== "number" || typeof d !== "number") {
+if (typeof a !== "number" || a <= 0) {
   return new Response("Invalid reward rule configuration", { status: 500 });
 }
 
-// discountAmount = number of dollars user used
-const n = Math.floor(discountAmount); // slab count
+// discountAmount = dollars used
+const pointsToRedeem = Math.round(discountAmount * a);
 
-if (n <= 0) {
-  return new Response("Invalid discount amount", { status: 400 });
-}
-
-// AP formula: total points for n dollars
-// Sn = n/2 * [2a + (n-1)d]
-const pointsToRedeem = Math.round(
-  (n / 2) * (2 * a + (n - 1) * d)
-);
+console.log("🪙 Redeem Calculation:", {
+  discountAmount,
+  pointsPerDollar: a,
+  pointsToRedeem
+});
 
 console.log("🪙 AP Redeem Calculation:", {
   discountAmount,

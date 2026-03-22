@@ -103,33 +103,17 @@ export async function action({ request }) {
    CALCULATE DISCOUNT USING AP (a, d)
 ---------------------------------------------- */
 
-const { basePoints: a, difference: d } = rewardRule;
+const { basePoints: a } = rewardRule;
 
-if (typeof a !== "number" || typeof d !== "number") {
+if (typeof a !== "number" || a <= 0) {
   throw new Error("Invalid reward rule configuration");
 }
 
 const points = Number(availablePoints) || 0;
 
-let slab = 0;
+const coins = (points / a).toFixed(2);
 
-// Step 1: Find base slab (n)
-if (points >= a) {
-  slab = Math.floor((points - a) / d) + 1;
-}
-
-// Step 2: Handle decimal threshold (like 2.75 → next slab)
-const currentSlabPoints = a + (slab - 1) * d;
-const remainingPoints = points - currentSlabPoints;
-
-if (remainingPoints >= d * 0.75) {
-  slab += 1;
-}
-
-// Step 3: Final discount (₹ / $ equivalent)
-const coins = Math.max(0, slab);
-
-console.log(`💰 AP Discount calculated: ${coins}`);
+console.log(`💰 Discount calculated: $${coins}`);
 
 
     /* ----------------------------------------------
