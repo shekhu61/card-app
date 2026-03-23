@@ -40,16 +40,32 @@ const shopifyOrderId = rawOrder_Id.split("/").pop(); // 6851559817465
     }
 
    /* ================= CALCULATE POINTS USING AP ================= */
-/* ================= CALCULATE POINTS FROM DISCOUNT ================= */
+/* ================= CALCULATE POINTS ================= */
 
-const { basePoints: a } = rewardRule; // points per $1
+// points per $1 (keep this FIXED, e.g. 6)
+const { basePoints: a } = rewardRule;
 
 if (typeof a !== "number" || a <= 0) {
   return new Response("Invalid reward rule configuration", { status: 500 });
 }
 
-// discountAmount = dollars used
-const pointsToRedeem = Math.round(discountAmount * a);
+// Step 1: raw calculation
+let pointsToRedeem = Math.round(discountAmount * a);
+
+// Step 2: round UP to next multiple of 5
+const remainder = pointsToRedeem % 5;
+
+if (remainder !== 0) {
+  pointsToRedeem += (5 - remainder);
+}
+
+// Debug logs
+console.log("🪙 Redeem Calculation:", {
+  discountAmount,
+  pointsPerDollar: a,
+  rawPoints: discountAmount * a,
+  finalPoints: pointsToRedeem
+});
 
 console.log("🪙 Redeem Calculation:", {
   discountAmount,
