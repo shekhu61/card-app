@@ -174,41 +174,55 @@ console.log(`💰 Discount calculated: $${coins}`);
     }
 
     if (!discountNode) {
-      console.log("➕ Creating discount");
+  console.log("➕ Creating discount with shipping combinations");
 
-      await admin.graphql(
-        `
-        mutation ($input: DiscountCodeBasicInput!) {
-          discountCodeBasicCreate(basicCodeDiscount: $input) {
-            userErrors { message }
-          }
+  await admin.graphql(
+    `
+    mutation ($input: DiscountCodeBasicInput!) {
+      discountCodeBasicCreate(basicCodeDiscount: $input) {
+        discountCodeBasic {
+          id
+          title
         }
-        `,
-        {
-          variables: {
-            input: {
-              title: discountCode,
-              code: discountCode,
-              startsAt: new Date().toISOString(),
-              customerSelection: {
-                customers: { add: [shopifyCustomerId] },
+        userErrors { 
+          field 
+          message 
+        }
+      }
+    }
+    `,
+    {
+      variables: {
+        input: {
+          title: discountCode,
+          code: discountCode,
+          startsAt: new Date().toISOString(),
+          customerSelection: {
+            customers: { add: [shopifyCustomerId] },
+          },
+          customerGets: {
+            items: { all: true },
+            value: {
+              discountAmount: {
+                amount: String(coins),
+                appliesOnEachItem: false,
               },
-              customerGets: {
-                items: { all: true },
-                value: {
-                  discountAmount: {
-                    amount: String(coins),
-                    appliesOnEachItem: false,
-                  },
-                },
-              },
-              usageLimit: 1000,
-              appliesOncePerCustomer: false,
             },
           },
-        }
-      );
-    } else {
+          usageLimit: 1000,
+          appliesOncePerCustomer: false,
+          // --- ADDED THIS SECTION ---
+          combinesWith: {
+            shippingDiscounts: true, // Allows stacking with shipping discounts
+            orderDiscounts: false,    // Set to true if you want to stack with other order-level discounts
+            productDiscounts: false,  // Set to true if you want to stack with product-level discounts
+          },
+          // ---------------------------
+        },
+      },
+    }
+  );
+} else {
       console.log("✏️ Updating discount");
 
       await admin.graphql(
