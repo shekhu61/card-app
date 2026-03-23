@@ -74,7 +74,7 @@ async function fetchAllEmployeeRecords(pageSize = 20) {
 
   while (hasMore) {
     const url =
-      `https://stg-rewardsapi.centerforautism.com/CardShopWrapper/EmployeeDetails` +
+      `https://rewardsapi.centerforautism.com/CardShopWrapper/EmployeeDetails` +
       `?PageNumber=${page}&PageSize=${pageSize}&FromDate=2019-01-01&ToDate=2026-12-31`;
 
     console.log(`📄 Fetching employee list page ${page}`);
