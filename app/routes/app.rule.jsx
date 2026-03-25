@@ -115,22 +115,7 @@ export default function RupePage() {
       gap: "10px"
     }}
   >
-    <label style={{ flex: 1, fontSize: "14px", color: "#555" }}>
-      Difference per $ (d)
-    </label>
-    <input
-      type="number"
-      value={d}
-      onChange={(e) => setD(e.target.value)}
-      style={{
-        flex: 1,
-        padding: "10px",
-        borderRadius: "8px",
-        border: "1px solid #ddd",
-        fontSize: "14px",
-        outline: "none"
-      }}
-    />
+
   </div>
 
   {/* Button */}
