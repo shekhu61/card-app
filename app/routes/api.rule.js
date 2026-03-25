@@ -26,11 +26,10 @@ export async function action({ request }) {
 
     const body = await request.json();
 
-    const basePoints = parseFloat(body.a); // "a"
-    const difference = parseFloat(body.d); // "d"
+    const basePoints = parseFloat(body.a); // base points only
 
-    if (isNaN(basePoints) || isNaN(difference)) {
-      return new Response("Invalid values", { status: 400 });
+    if (isNaN(basePoints)) {
+      return new Response("Invalid basePoints value", { status: 400 });
     }
 
     // Deactivate old rules
@@ -39,11 +38,11 @@ export async function action({ request }) {
       data: { isActive: false }
     });
 
-    // Create new rule
+    // Create new rule (difference fixed as 0)
     const rule = await prisma.rewardRule.create({
       data: {
         basePoints,
-        difference,
+        difference: 0,
         isActive: true
       }
     });
