@@ -75,6 +75,9 @@ async function fetchWithAuth(url) {
 /* ========================================================
    FETCH EMAIL ALIASES
 ======================================================== */
+/* ========================================================
+   FETCH EMAIL ALIASES
+======================================================== */
 async function fetchEmailAliases() {
 
   const url =
@@ -82,7 +85,15 @@ async function fetchEmailAliases() {
 
   const data = await fetchWithAuth(url);
 
-  return Array.isArray(data) ? data : data?.data || [];
+  // 👇 Show raw API response
+  console.log("📦 Alias API Raw Response:", data);
+
+  const records = Array.isArray(data) ? data : data?.data || [];
+
+  // 👇 Show parsed records
+  console.log("📊 Parsed Alias Records:", records);
+
+  return records;
 }
 
 /* ========================================================
