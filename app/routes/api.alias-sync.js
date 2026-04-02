@@ -1,8 +1,9 @@
 import { getToken, setToken } from "../utils/rewardsToken.server";
 
 /* ========================================================
-   ENV CONFIG
+ENV
 ======================================================== */
+
 const SHOP = process.env.SHOPIFY_SHOP_DOMAIN;
 const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 const FLOW_SECRET = process.env.FLOW_SECRET;
@@ -12,8 +13,9 @@ if (!SHOP || !ACCESS_TOKEN) {
 }
 
 /* ========================================================
-   LOGIN TO REWARDS API
+LOGIN REWARDS API
 ======================================================== */
+
 async function login() {
 
   const res = await fetch(
@@ -28,12 +30,9 @@ async function login() {
     }
   );
 
-  const text = await res.text();
-  const data = JSON.parse(text);
+  const data = await res.json();
 
-  if (!data?.token) {
-    throw new Error("Rewards login failed");
-  }
+  if (!data?.token) throw new Error("Rewards login failed");
 
   setToken(data.token, 3600);
 
@@ -41,8 +40,9 @@ async function login() {
 }
 
 /* ========================================================
-   SAFE FETCH WITH AUTO TOKEN REFRESH
+FETCH WITH AUTH
 ======================================================== */
+
 async function fetchWithAuth(url) {
 
   let token = getToken();
@@ -60,45 +60,18 @@ async function fetchWithAuth(url) {
     token = await login();
 
     res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+      headers: { Authorization: `Bearer ${token}` }
     });
 
   }
 
-  const text = await res.text();
-
-  return text ? JSON.parse(text) : null;
+  return res.json();
 }
 
 /* ========================================================
-   FETCH EMAIL ALIASES
+SHOPIFY GRAPHQL
 ======================================================== */
-/* ========================================================
-   FETCH EMAIL ALIASES
-======================================================== */
-async function fetchEmailAliases() {
 
-  const url =
-    "https://rewardsapi.centerforautism.com/CardShopWrapper/GetEmailAliases";
-
-  const data = await fetchWithAuth(url);
-
-  // 👇 Show raw API response
-  console.log("📦 Alias API Raw Response:", data);
-
-  const records = Array.isArray(data) ? data : data?.data || [];
-
-  // 👇 Show parsed records
-  console.log("📊 Parsed Alias Records:", records);
-
-  return records;
-}
-
-/* ========================================================
-   SHOPIFY GRAPHQL HELPER
-======================================================== */
 async function shopifyGraphQL(query, variables = {}) {
 
   const res = await fetch(
@@ -109,10 +82,7 @@ async function shopifyGraphQL(query, variables = {}) {
         "Content-Type": "application/json",
         "X-Shopify-Access-Token": ACCESS_TOKEN
       },
-      body: JSON.stringify({
-        query,
-        variables
-      })
+      body: JSON.stringify({ query, variables })
     }
   );
 
@@ -120,19 +90,87 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 /* ========================================================
-   GET CUSTOMER BY EMAIL
+FETCH ALL PTS CUSTOMERS
 ======================================================== */
+
+async function getAllPtsCustomers() {
+
+  let customers = [];
+  let cursor = null;
+  let hasNextPage = true;
+
+  while (hasNextPage) {
+
+    const query = `
+    query ($cursor: String) {
+      customers(
+        first: 250
+        after: $cursor
+        query: "tag:pts"
+      ) {
+        edges {
+          cursor
+          node {
+            id
+            email
+            firstName
+            lastName
+          }
+        }
+        pageInfo {
+          hasNextPage
+        }
+      }
+    }`;
+
+    const result = await shopifyGraphQL(query, { cursor });
+
+    const edges = result?.data?.customers?.edges || [];
+
+    edges.forEach(edge => customers.push(edge.node));
+
+    hasNextPage = result?.data?.customers?.pageInfo?.hasNextPage;
+
+    cursor = edges.length ? edges[edges.length - 1].cursor : null;
+
+    console.log("Fetched customers:", customers.length);
+
+  }
+
+  console.log("Total PTS customers:", customers.length);
+
+  return customers;
+}
+
+/* ========================================================
+GET EMAIL ALIASES
+======================================================== */
+
+async function getAliases(email) {
+
+  const encodedEmail = encodeURIComponent(email);
+
+  const url =
+  `https://rewardsapi.centerforautism.com/CardShopWrapper/GetEmailAliases?EmailId=${encodedEmail}`;
+
+  const data = await fetchWithAuth(url);
+
+  console.log("Alias response:", email, data);
+
+  return data?.proxyaddresses || [];
+}
+
+/* ========================================================
+CHECK CUSTOMER EXISTS
+======================================================== */
+
 async function getCustomerByEmail(email) {
 
   const query = `
-  query getCustomer($query: String!) {
-    customers(first: 1, query: $query) {
+  query ($query: String!) {
+    customers(first:1, query:$query) {
       edges {
-        node {
-          id
-          email
-          tags
-        }
+        node { id }
       }
     }
   }`;
@@ -145,110 +183,112 @@ async function getCustomerByEmail(email) {
 }
 
 /* ========================================================
-   UPDATE CUSTOMER
+CREATE CUSTOMER
 ======================================================== */
-async function updateCustomer(customerId, existingTags = [], employeeID) {
+
+async function createCustomer(firstName,lastName,email,employeeId) {
 
   const mutation = `
-  mutation updateCustomer($input: CustomerInput!) {
-    customerUpdate(input: $input) {
-      customer {
-        id
-        email
-        tags
-      }
-      userErrors {
-        field
-        message
-      }
+  mutation ($input: CustomerInput!) {
+    customerCreate(input:$input) {
+      customer { id email }
+      userErrors { field message }
     }
   }`;
 
-  const tagsSet = new Set(existingTags || []);
-  tagsSet.add("pts");
-
   const input = {
-    id: customerId,
-    tags: Array.from(tagsSet),
-    metafields: [
+
+    firstName,
+    lastName,
+    email,
+
+    tags:["pts"],
+
+    metafields:[
       {
-        namespace: "custom",
-        key: "employeeid",
-        type: "single_line_text_field",
-        value: String(employeeID)
+        namespace:"custom",
+        key:"employeeid",
+        type:"single_line_text_field",
+        value:String(employeeId)
+      },
+      {
+        namespace:"custom",
+        key:"office_location",
+        type:"single_line_text_field",
+        value:"US ME Portland ME"
       }
     ]
+
   };
 
-  return shopifyGraphQL(mutation, { input });
+  return shopifyGraphQL(mutation,{input});
 }
 
 /* ========================================================
-   ALIAS SYNC
+MAIN ALIAS SYNC
 ======================================================== */
+
 async function runAliasSync() {
 
   console.log("Alias Sync Started");
 
-  const aliasRecords = await fetchEmailAliases();
+  const customers = await getAllPtsCustomers();
 
-  let updated = 0;
+  let checked = 0;
+  let created = 0;
   let skipped = 0;
-  let failed = 0;
 
-  for (const record of aliasRecords) {
+  for (const cust of customers) {
 
-    const { email, employeeId, proxyaddresses } = record;
+    const email = cust.email;
 
-    if (!proxyaddresses || proxyaddresses.length === 0) {
-      skipped++;
-      continue;
-    }
+    if (!email) continue;
 
-    try {
+    checked++;
 
-      const customer = await getCustomerByEmail(email);
+    const aliases = await getAliases(email);
 
-      if (!customer) {
+    if (!aliases.length) continue;
+
+    for (const aliasEmail of aliases) {
+
+      const exists = await getCustomerByEmail(aliasEmail);
+
+      if (exists) {
+
         skipped++;
+
         continue;
+
       }
 
-      const result = await updateCustomer(
-        customer.id,
-        customer.tags,
-        employeeId
+      await createCustomer(
+        cust.firstName,
+        cust.lastName,
+        aliasEmail,
+        cust.id
       );
 
-      const errors =
-        result?.data?.customerUpdate?.userErrors;
+      console.log("Created alias customer:", aliasEmail);
 
-      if (errors?.length) {
-        failed++;
-      } else {
-        updated++;
-      }
-
-    } catch (err) {
-
-      console.error("Alias sync error:", err.message);
-      failed++;
+      created++;
 
     }
 
   }
 
-  console.log("Alias Sync Completed", {
-    updated,
-    skipped,
-    failed
+  console.log("Alias Sync Completed",{
+    checked,
+    created,
+    skipped
   });
 
 }
 
 /* ========================================================
-   SHOPIFY FLOW ACTION
+SHOPIFY FLOW ACTION
 ======================================================== */
+
 export async function action({ request }) {
 
   console.log("Shopify Flow Triggered");
@@ -256,30 +296,25 @@ export async function action({ request }) {
   const body = await request.json();
 
   if (body?.secret !== FLOW_SECRET) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response("Unauthorized",{status:401});
   }
 
-  const response = new Response(
+  setTimeout(()=>{
+
+    runAliasSync().catch(err=>{
+      console.error("Alias sync crashed:",err);
+    });
+
+  },0);
+
+  return new Response(
     JSON.stringify({
-      success: true,
-      message: "Alias sync started"
+      success:true,
+      message:"Alias sync started"
     }),
     {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json"
-      }
+      headers:{ "Content-Type":"application/json" }
     }
   );
-
-  setTimeout(() => {
-
-    runAliasSync().catch((err) =>
-      console.error("Alias sync crashed:", err)
-    );
-
-  }, 0);
-
-  return response;
 
 }
