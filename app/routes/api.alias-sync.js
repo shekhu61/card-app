@@ -8,10 +8,6 @@ const SHOP = process.env.SHOPIFY_SHOP_DOMAIN;
 const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 const FLOW_SECRET = process.env.FLOW_SECRET;
 
-if (!SHOP || !ACCESS_TOKEN) {
-  throw new Error("Missing Shopify environment variables");
-}
-
 /* ========================================================
 LOGIN REWARDS API
 ======================================================== */
@@ -32,15 +28,13 @@ async function login() {
 
   const data = await res.json();
 
-  if (!data?.token) throw new Error("Rewards login failed");
-
   setToken(data.token, 3600);
 
   return data.token;
 }
 
 /* ========================================================
-FETCH WITH AUTH (SAFE JSON)
+SAFE FETCH
 ======================================================== */
 
 async function fetchWithAuth(url) {
@@ -50,21 +44,15 @@ async function fetchWithAuth(url) {
   if (!token) token = await login();
 
   let res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
+    headers: { Authorization: `Bearer ${token}` }
   });
 
   if (res.status === 401) {
-
     token = await login();
 
     res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+      headers: { Authorization: `Bearer ${token}` }
     });
-
   }
 
   const text = await res.text();
@@ -76,7 +64,7 @@ async function fetchWithAuth(url) {
 
   try {
     return JSON.parse(text);
-  } catch (err) {
+  } catch {
     console.log("⚠ Invalid JSON:", text);
     return null;
   }
@@ -105,7 +93,7 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 /* ========================================================
-GET ALL PTS CUSTOMERS (PAGINATION)
+FETCH ALL PTS CUSTOMERS
 ======================================================== */
 
 async function getAllPtsCustomers() {
@@ -126,11 +114,12 @@ async function getAllPtsCustomers() {
             email
             firstName
             lastName
+            metafield(namespace:"custom", key:"employeeid") {
+              value
+            }
           }
         }
-        pageInfo {
-          hasNextPage
-        }
+        pageInfo { hasNextPage }
       }
     }`;
 
@@ -138,7 +127,17 @@ async function getAllPtsCustomers() {
 
     const edges = result?.data?.customers?.edges || [];
 
-    edges.forEach(e => customers.push(e.node));
+    edges.forEach(e => {
+
+      customers.push({
+        id: e.node.id,
+        email: e.node.email,
+        firstName: e.node.firstName,
+        lastName: e.node.lastName,
+        employeeId: e.node.metafield?.value || null
+      });
+
+    });
 
     hasNextPage = result?.data?.customers?.pageInfo?.hasNextPage;
 
@@ -154,7 +153,7 @@ async function getAllPtsCustomers() {
 }
 
 /* ========================================================
-GET EMAIL ALIASES
+GET ALIASES
 ======================================================== */
 
 async function getAliases(email) {
@@ -166,19 +165,14 @@ async function getAliases(email) {
 
   const data = await fetchWithAuth(url);
 
-  if (!data) {
-    console.log("No alias data for:", email);
-    return [];
-  }
-
-  console.log("Alias response:", email, data);
+  if (!data) return [];
 
   return data?.proxyaddresses || [];
 
 }
 
 /* ========================================================
-CHECK CUSTOMER EXISTS
+GET CUSTOMER BY EMAIL
 ======================================================== */
 
 async function getCustomerByEmail(email) {
@@ -215,13 +209,10 @@ async function createCustomer(firstName,lastName,email,employeeId) {
   }`;
 
   const input = {
-
     firstName,
     lastName,
     email,
-
     tags:["pts"],
-
     metafields:[
       {
         namespace:"custom",
@@ -236,7 +227,6 @@ async function createCustomer(firstName,lastName,email,employeeId) {
         value:"US ME Portland ME"
       }
     ]
-
   };
 
   return shopifyGraphQL(mutation,{input});
@@ -244,7 +234,43 @@ async function createCustomer(firstName,lastName,email,employeeId) {
 }
 
 /* ========================================================
-MAIN ALIAS SYNC
+UPDATE METAFIELDS
+======================================================== */
+
+async function updateMetafields(customerId, employeeId) {
+
+  const mutation = `
+  mutation ($input: CustomerInput!) {
+    customerUpdate(input:$input) {
+      customer { id }
+      userErrors { field message }
+    }
+  }`;
+
+  const input = {
+    id: customerId,
+    metafields:[
+      {
+        namespace:"custom",
+        key:"employeeid",
+        type:"single_line_text_field",
+        value:String(employeeId)
+      },
+      {
+        namespace:"custom",
+        key:"office_location",
+        type:"single_line_text_field",
+        value:"US ME Portland ME"
+      }
+    ]
+  };
+
+  return shopifyGraphQL(mutation,{input});
+
+}
+
+/* ========================================================
+MAIN SYNC
 ======================================================== */
 
 async function runAliasSync() {
@@ -253,18 +279,15 @@ async function runAliasSync() {
 
   const customers = await getAllPtsCustomers();
 
-  let checked = 0;
   let created = 0;
+  let updated = 0;
   let skipped = 0;
 
   for (const cust of customers) {
 
-    if (!cust.email) continue;
+    if (!cust.email || !cust.employeeId) continue;
 
-    checked++;
-
-    // small delay to avoid API overload
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise(r => setTimeout(r,50));
 
     const aliases = await getAliases(cust.email);
 
@@ -272,31 +295,38 @@ async function runAliasSync() {
 
     for (const aliasEmail of aliases) {
 
-      const exists = await getCustomerByEmail(aliasEmail);
+      const existing = await getCustomerByEmail(aliasEmail);
 
-      if (exists) {
-        skipped++;
-        continue;
+      if (!existing) {
+
+        await createCustomer(
+          cust.firstName,
+          cust.lastName,
+          aliasEmail,
+          cust.employeeId
+        );
+
+        console.log("Created proxy customer:", aliasEmail);
+
+        created++;
+
+      } else {
+
+        await updateMetafields(existing.id, cust.employeeId);
+
+        console.log("Updated proxy metafields:", aliasEmail);
+
+        updated++;
+
       }
-
-      await createCustomer(
-        cust.firstName,
-        cust.lastName,
-        aliasEmail,
-        cust.id
-      );
-
-      console.log("Created alias customer:", aliasEmail);
-
-      created++;
 
     }
 
   }
 
   console.log("Alias Sync Completed",{
-    checked,
     created,
+    updated,
     skipped
   });
 
@@ -317,11 +347,9 @@ export async function action({ request }) {
   }
 
   setTimeout(()=>{
-
     runAliasSync().catch(err=>{
       console.error("Alias sync crashed:",err);
     });
-
   },0);
 
   return new Response(
