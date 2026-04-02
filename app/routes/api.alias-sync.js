@@ -40,7 +40,7 @@ async function login() {
 }
 
 /* ========================================================
-FETCH WITH AUTH
+FETCH WITH AUTH (SAFE JSON)
 ======================================================== */
 
 async function fetchWithAuth(url) {
@@ -60,12 +60,27 @@ async function fetchWithAuth(url) {
     token = await login();
 
     res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
     });
 
   }
 
-  return res.json();
+  const text = await res.text();
+
+  if (!text) {
+    console.log("⚠ Empty API response:", url);
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    console.log("⚠ Invalid JSON:", text);
+    return null;
+  }
+
 }
 
 /* ========================================================
@@ -90,7 +105,7 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 /* ========================================================
-FETCH ALL PTS CUSTOMERS
+GET ALL PTS CUSTOMERS (PAGINATION)
 ======================================================== */
 
 async function getAllPtsCustomers() {
@@ -103,11 +118,7 @@ async function getAllPtsCustomers() {
 
     const query = `
     query ($cursor: String) {
-      customers(
-        first: 250
-        after: $cursor
-        query: "tag:pts"
-      ) {
+      customers(first:250, after:$cursor, query:"tag:pts") {
         edges {
           cursor
           node {
@@ -127,7 +138,7 @@ async function getAllPtsCustomers() {
 
     const edges = result?.data?.customers?.edges || [];
 
-    edges.forEach(edge => customers.push(edge.node));
+    edges.forEach(e => customers.push(e.node));
 
     hasNextPage = result?.data?.customers?.pageInfo?.hasNextPage;
 
@@ -155,9 +166,15 @@ async function getAliases(email) {
 
   const data = await fetchWithAuth(url);
 
+  if (!data) {
+    console.log("No alias data for:", email);
+    return [];
+  }
+
   console.log("Alias response:", email, data);
 
   return data?.proxyaddresses || [];
+
 }
 
 /* ========================================================
@@ -180,6 +197,7 @@ async function getCustomerByEmail(email) {
   });
 
   return result?.data?.customers?.edges?.[0]?.node || null;
+
 }
 
 /* ========================================================
@@ -222,6 +240,7 @@ async function createCustomer(firstName,lastName,email,employeeId) {
   };
 
   return shopifyGraphQL(mutation,{input});
+
 }
 
 /* ========================================================
@@ -240,13 +259,14 @@ async function runAliasSync() {
 
   for (const cust of customers) {
 
-    const email = cust.email;
-
-    if (!email) continue;
+    if (!cust.email) continue;
 
     checked++;
 
-    const aliases = await getAliases(email);
+    // small delay to avoid API overload
+    await new Promise(r => setTimeout(r, 50));
+
+    const aliases = await getAliases(cust.email);
 
     if (!aliases.length) continue;
 
@@ -255,11 +275,8 @@ async function runAliasSync() {
       const exists = await getCustomerByEmail(aliasEmail);
 
       if (exists) {
-
         skipped++;
-
         continue;
-
       }
 
       await createCustomer(
