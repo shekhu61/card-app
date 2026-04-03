@@ -76,7 +76,6 @@ console.log("🪙 Redeem Calculation:", {
 console.log("🪙 AP Redeem Calculation:", {
   discountAmount,
   basePoints: a,
-  difference: d,
   pointsToRedeem
 });
 
