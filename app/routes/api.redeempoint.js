@@ -27,7 +27,7 @@ export async function loader({ request }) {
 
     /* ================= LOGIN ================= */
 
-    const BASE_URL = "https://stg-rewardsapi.centerforautism.com";
+    const BASE_URL = "https://rewardsapi.centerforautism.com";
 
     const loginRes = await fetch(`${BASE_URL}/Authentication/Login`, {
       method: "POST",
