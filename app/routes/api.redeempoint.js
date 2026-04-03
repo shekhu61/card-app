@@ -1,4 +1,3 @@
-import prisma from "../db.server";
 
 export async function loader({ request }) {
   console.log("🚀 Shopify Flow Redeem Triggered");
