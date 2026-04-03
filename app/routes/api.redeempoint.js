@@ -2,15 +2,15 @@ import prisma from "../db.server";
 
 export async function loader({ request }) {
 
-  console.log("=================================================");
+  console.log("================================================");
   console.log("🚀 Shopify Flow Redeem Triggered");
-  console.log("=================================================");
+  console.log("================================================");
 
   try {
 
     /* ================= READ HEADERS ================= */
 
-    console.log("📥 Reading headers from Shopify Flow...");
+    console.log("📥 Reading headers...");
 
     const raw = request.headers.get("points");
     const rawOrderId = request.headers.get("ordername");
@@ -22,7 +22,7 @@ export async function loader({ request }) {
     console.log("Header orderId:", rawOrder_Id);
     console.log("Header employeeId:", employeeId);
 
-    if (!raw || !rawOrderId || !employeeId || !rawOrder_Id) {
+    if (!raw || !rawOrderId || !rawOrder_Id || !employeeId) {
       console.log("❌ Missing required headers");
       return new Response("Missing parameters", { status: 400 });
     }
@@ -36,10 +36,10 @@ export async function loader({ request }) {
 
     /* ================= DISCOUNT CALCULATION ================= */
 
-    console.log("💲 Calculating discount value...");
+    console.log("💲 Calculating discount amount...");
 
     const values = raw.split(".0").filter(v => v !== "");
-    console.log("Split discount values:", values);
+    console.log("Split values:", values);
 
     const discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
 
@@ -53,7 +53,7 @@ export async function loader({ request }) {
 
     /* ================= LOAD REWARD RULE ================= */
 
-    console.log("📊 Fetching reward rule from database...");
+    console.log("📊 Fetching reward rule from DB...");
 
     const rewardRule = await prisma.rewardRule.findFirst({
       where: { isActive: true },
@@ -73,7 +73,7 @@ export async function loader({ request }) {
     const { basePoints: a } = rewardRule;
     const pointsPerDollar = a;
 
-    console.log("Base points per dollar:", a);
+    console.log("Points per dollar:", pointsPerDollar);
 
     if (typeof a !== "number" || a <= 0) {
       console.log("❌ Invalid reward rule configuration");
@@ -87,8 +87,6 @@ export async function loader({ request }) {
     console.log("Raw points:", pointsToRedeem);
 
     const remainder = pointsToRedeem % 5;
-
-    console.log("Remainder after modulo 5:", remainder);
 
     if (remainder !== 0) {
       pointsToRedeem += (5 - remainder);
@@ -119,17 +117,17 @@ export async function loader({ request }) {
       }),
     });
 
-    console.log("Login response status:", loginRes.status);
+    console.log("Login status:", loginRes.status);
 
     const loginText = await loginRes.text();
-    console.log("🔐 Login raw:", loginText);
+    console.log("Login raw response:", loginText);
 
     let loginData;
 
     try {
       loginData = JSON.parse(loginText);
     } catch {
-      console.log("❌ Login API did not return JSON");
+      console.log("❌ Login response not JSON");
       throw new Error("Login API did not return JSON");
     }
 
@@ -140,7 +138,7 @@ export async function loader({ request }) {
       loginData.token;
 
     if (!token) {
-      console.log("❌ Token missing in login response");
+      console.log("❌ Token missing");
       throw new Error("Login failed: token missing");
     }
 
@@ -149,7 +147,7 @@ export async function loader({ request }) {
 
     /* ================= REDEEM ================= */
 
-    console.log("🎯 Preparing redeem request...");
+    console.log("🎯 Preparing redeem API call...");
 
     const redeemUrl =
       `${BASE_URL}/CardShopWrapper/SaveEmployeeOrderExternal` +
@@ -164,33 +162,32 @@ export async function loader({ request }) {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`
-      },
+      }
     });
 
-    console.log("Redeem response status:", redeemRes.status);
+    console.log("Redeem API status:", redeemRes.status);
 
     const redeemText = await redeemRes.text();
-    console.log("📨 Redeem raw response:", redeemText);
+
+    console.log("📨 Redeem API raw response:", redeemText);
 
     if (!redeemRes.ok) {
-      console.log("❌ Redeem API returned error");
-      throw new Error(redeemText);
+      console.log("❌ Redeem API failed");
+      throw new Error(redeemText || "Redeem API failed");
     }
 
 
     /* ================= UPDATE SHOPIFY METAFIELD ================= */
 
-    console.log("📝 Updating Shopify order metafield...");
+    console.log("📝 Updating Shopify metafield...");
 
     const SHOPIFY_STORE = process.env.SHOPIFY_SHOP_DOMAIN;
     const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 
-    console.log("Shopify Store:", SHOPIFY_STORE);
-
     const meta_url =
       `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${shopifyOrderId}/metafields.json`;
 
-    console.log("Metafield API URL:", meta_url);
+    console.log("Metafield URL:", meta_url);
 
     const metafieldRes = await fetch(meta_url, {
       method: "POST",
@@ -217,7 +214,7 @@ export async function loader({ request }) {
 
     /* ================= SUCCESS ================= */
 
-    console.log("✅ Redeem flow completed successfully");
+    console.log("✅ Redeem process completed successfully");
 
     return new Response(
       JSON.stringify({
@@ -229,9 +226,7 @@ export async function loader({ request }) {
         pointsRedeemed: pointsToRedeem,
       }),
       {
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
       }
     );
 
