@@ -1,96 +1,110 @@
 import prisma from "../db.server";
 
 export async function loader({ request }) {
+
+  console.log("=================================================");
   console.log("🚀 Shopify Flow Redeem Triggered");
+  console.log("=================================================");
 
   try {
 
     /* ================= READ HEADERS ================= */
 
-    const raw = request.headers.get("points"); // "90.090.0"
+    console.log("📥 Reading headers from Shopify Flow...");
+
+    const raw = request.headers.get("points");
     const rawOrderId = request.headers.get("ordername");
     const rawOrder_Id = request.headers.get("orderId");
-    const shopifyOrderId = rawOrder_Id.split("/").pop();
-    console.log(shopifyOrderId);
-
     const employeeId = request.headers.get("employeeId");
 
-    if (!raw || !rawOrderId || !employeeId) {
+    console.log("Header points:", raw);
+    console.log("Header ordername:", rawOrderId);
+    console.log("Header orderId:", rawOrder_Id);
+    console.log("Header employeeId:", employeeId);
+
+    if (!raw || !rawOrderId || !employeeId || !rawOrder_Id) {
+      console.log("❌ Missing required headers");
       return new Response("Missing parameters", { status: 400 });
     }
 
+    const shopifyOrderId = rawOrder_Id.split("/").pop();
+    console.log("🛒 Shopify Order ID:", shopifyOrderId);
+
     const orderId = rawOrderId.replace("#", "").trim();
+    console.log("🧾 Clean Order ID:", orderId);
 
-    // Split "90.090.0" → ["90","90"]
+
+    /* ================= DISCOUNT CALCULATION ================= */
+
+    console.log("💲 Calculating discount value...");
+
     const values = raw.split(".0").filter(v => v !== "");
-    const discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
+    console.log("Split discount values:", values);
 
-    if (isNaN(discountAmount) || discountAmount <= 0) {
-      return new Response("Invalid discount amount", { status: 400 });
-    }
+    const discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
 
     console.log("💲 Discount total:", discountAmount);
 
+    if (isNaN(discountAmount) || discountAmount <= 0) {
+      console.log("❌ Invalid discount amount");
+      return new Response("Invalid discount amount", { status: 400 });
+    }
+
 
     /* ================= LOAD REWARD RULE ================= */
+
+    console.log("📊 Fetching reward rule from database...");
 
     const rewardRule = await prisma.rewardRule.findFirst({
       where: { isActive: true },
       orderBy: { createdAt: "desc" },
     });
 
+    console.log("Reward Rule:", rewardRule);
+
     if (!rewardRule) {
+      console.log("❌ No active reward rule found");
       return new Response("No active reward rule found", { status: 500 });
     }
 
 
     /* ================= CALCULATE POINTS ================= */
 
-    // points per $1 (keep this FIXED, e.g. 6)
     const { basePoints: a } = rewardRule;
+    const pointsPerDollar = a;
+
+    console.log("Base points per dollar:", a);
 
     if (typeof a !== "number" || a <= 0) {
+      console.log("❌ Invalid reward rule configuration");
       return new Response("Invalid reward rule configuration", { status: 500 });
     }
 
-    // FIX: define this variable so it can be returned later
-    const pointsPerDollar = a;
+    console.log("🧮 Calculating redeem points...");
 
-    // Step 1: raw calculation
     let pointsToRedeem = Math.round(discountAmount * a);
 
-    // Step 2: round UP to next multiple of 5
+    console.log("Raw points:", pointsToRedeem);
+
     const remainder = pointsToRedeem % 5;
+
+    console.log("Remainder after modulo 5:", remainder);
 
     if (remainder !== 0) {
       pointsToRedeem += (5 - remainder);
     }
 
-    console.log("🪙 Redeem Calculation:", {
-      discountAmount,
-      pointsPerDollar: a,
-      rawPoints: discountAmount * a,
-      finalPoints: pointsToRedeem
-    });
-
-    console.log("🪙 Redeem Calculation:", {
-      discountAmount,
-      pointsPerDollar: a,
-      pointsToRedeem
-    });
-
-    console.log("🪙 AP Redeem Calculation:", {
-      discountAmount,
-      basePoints: a,
-      pointsToRedeem
-    });
+    console.log("🪙 Final points to redeem:", pointsToRedeem);
 
     if (pointsToRedeem <= 0) {
+      console.log("❌ Calculated points invalid");
       return new Response("Calculated points invalid", { status: 400 });
     }
 
 
     /* ================= LOGIN ================= */
+
+    console.log("🔐 Logging into rewards API...");
 
     const BASE_URL = "https://rewardsapi.centerforautism.com";
 
@@ -105,6 +119,8 @@ export async function loader({ request }) {
       }),
     });
 
+    console.log("Login response status:", loginRes.status);
+
     const loginText = await loginRes.text();
     console.log("🔐 Login raw:", loginText);
 
@@ -113,6 +129,7 @@ export async function loader({ request }) {
     try {
       loginData = JSON.parse(loginText);
     } catch {
+      console.log("❌ Login API did not return JSON");
       throw new Error("Login API did not return JSON");
     }
 
@@ -123,13 +140,16 @@ export async function loader({ request }) {
       loginData.token;
 
     if (!token) {
+      console.log("❌ Token missing in login response");
       throw new Error("Login failed: token missing");
     }
 
-    console.log("🔑 Token received");
+    console.log("🔑 Token received successfully");
 
 
     /* ================= REDEEM ================= */
+
+    console.log("🎯 Preparing redeem request...");
 
     const redeemUrl =
       `${BASE_URL}/CardShopWrapper/SaveEmployeeOrderExternal` +
@@ -141,29 +161,36 @@ export async function loader({ request }) {
     console.log("➡️ Redeem URL:", redeemUrl);
 
     const redeemRes = await fetch(redeemUrl, {
-      method: "PUT",
+      method: "POST",
       headers: {
         Authorization: `Bearer ${token}`
       },
     });
 
+    console.log("Redeem response status:", redeemRes.status);
+
     const redeemText = await redeemRes.text();
-    console.log("📨 Redeem raw:", redeemText);
+    console.log("📨 Redeem raw response:", redeemText);
 
     if (!redeemRes.ok) {
+      console.log("❌ Redeem API returned error");
       throw new Error(redeemText);
     }
 
 
     /* ================= UPDATE SHOPIFY METAFIELD ================= */
 
+    console.log("📝 Updating Shopify order metafield...");
+
     const SHOPIFY_STORE = process.env.SHOPIFY_SHOP_DOMAIN;
     const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+
+    console.log("Shopify Store:", SHOPIFY_STORE);
 
     const meta_url =
       `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${shopifyOrderId}/metafields.json`;
 
-    console.log(meta_url);
+    console.log("Metafield API URL:", meta_url);
 
     const metafieldRes = await fetch(meta_url, {
       method: "POST",
@@ -181,11 +208,16 @@ export async function loader({ request }) {
       }),
     });
 
+    console.log("Metafield response status:", metafieldRes.status);
+
     const metafieldData = await metafieldRes.json();
+
     console.log("📝 Metafield update response:", metafieldData);
 
 
     /* ================= SUCCESS ================= */
+
+    console.log("✅ Redeem flow completed successfully");
 
     return new Response(
       JSON.stringify({
@@ -205,7 +237,8 @@ export async function loader({ request }) {
 
   } catch (err) {
 
-    console.error("🔥 Redeem error:", err.message);
+    console.log("🔥 ERROR OCCURRED");
+    console.error("Error message:", err.message);
 
     return new Response(err.message, { status: 500 });
 
