@@ -4,45 +4,46 @@ export async function loader({ request }) {
   console.log("🚀 Shopify Flow Redeem Triggered");
 
   try {
+
     /* ================= READ HEADERS ================= */
-    const raw = request.headers.get("points"); // "90.090.0"
+    const raw = request.headers.get("points");
     const rawOrderId = request.headers.get("ordername");
     const rawOrder_Id = request.headers.get("orderId");
-const shopifyOrderId = rawOrder_Id.split("/").pop(); // 6851559817465
-
-    console.log(shopifyOrderId);
     const employeeId = request.headers.get("employeeId");
 
-    if (!raw || !rawOrderId || !employeeId) {
+    const shopifyOrderId = rawOrder_Id.split("/").pop();
+
+    console.log("Shopify Order ID:", shopifyOrderId);
+
+    if (!rawOrderId || !employeeId) {
       return new Response("Missing parameters", { status: 400 });
     }
 
     const orderId = rawOrderId.replace("#", "").trim();
 
-    // Split "90.090.0" → ["90","90"]
-    const values = raw.split(".0").filter(v => v !== "");
-    const discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
+    /* ================= FIXED POINTS ================= */
 
-    if (isNaN(discountAmount) || discountAmount <= 0) {
-      return new Response("Invalid discount amount", { status: 400 });
-    }
+    const pointsToRedeem = 15;
+    console.log("🪙 Fixed points to redeem:", pointsToRedeem);
 
-    console.log("💲 Discount total:", discountAmount);
-
-    
     /* ================= LOGIN ================= */
+
     const BASE_URL = "https://stg-rewardsapi.centerforautism.com";
 
     const loginRes = await fetch(`${BASE_URL}/Authentication/Login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ Username: "admin", Password: "admin" }),
+      body: JSON.stringify({
+        Username: "admin",
+        Password: "admin"
+      }),
     });
 
     const loginText = await loginRes.text();
     console.log("🔐 Login raw:", loginText);
 
     let loginData;
+
     try {
       loginData = JSON.parse(loginText);
     } catch {
@@ -50,16 +51,23 @@ const shopifyOrderId = rawOrder_Id.split("/").pop(); // 6851559817465
     }
 
     const token =
-      loginData.Token || loginData.AccessToken || loginData.access_token || loginData.token;
-    if (!token) throw new Error("Login failed: token missing");
+      loginData.Token ||
+      loginData.AccessToken ||
+      loginData.access_token ||
+      loginData.token;
 
-    console.log("🔑 Token received");
+    if (!token) {
+      throw new Error("Login failed: token missing");
+    }
+
+    console.log("🔑 Token received successfully");
 
     /* ================= REDEEM ================= */
+
     const redeemUrl =
       `${BASE_URL}/CardShopWrapper/SaveEmployeeOrderExternal` +
       `?EmployeeID=${employeeId}` +
-      `&PointRedeemed=15` +
+      `&PointRedeemed=${pointsToRedeem}` +
       `&Notes=Shopify Order` +
       `&ExternalReferenceID=${orderId}`;
 
@@ -67,20 +75,23 @@ const shopifyOrderId = rawOrder_Id.split("/").pop(); // 6851559817465
 
     const redeemRes = await fetch(redeemUrl, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     });
 
     const redeemText = await redeemRes.text();
     console.log("📨 Redeem raw:", redeemText);
 
-    if (!redeemRes.ok) throw new Error(redeemText);
+    if (!redeemRes.ok) {
+      throw new Error(redeemText);
+    }
 
     /* ================= UPDATE SHOPIFY METAFIELD ================= */
-    const SHOPIFY_STORE = process.env.SHOPIFY_SHOP_DOMAIN; // e.g. "mystore.myshopify.com"
-    const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN; // Admin API token
 
-    let meta_url = `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${shopifyOrderId}/metafields.json`;
-    console.log(meta_url);
+    const SHOPIFY_STORE = process.env.SHOPIFY_SHOP_DOMAIN;
+    const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+
     const metafieldRes = await fetch(
       `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${shopifyOrderId}/metafields.json`,
       {
@@ -104,19 +115,24 @@ const shopifyOrderId = rawOrder_Id.split("/").pop(); // 6851559817465
     console.log("📝 Metafield update response:", metafieldData);
 
     /* ================= SUCCESS ================= */
+
     return new Response(
       JSON.stringify({
         success: true,
         orderId,
         employeeId,
-        discountAmount,
-        pointsPerDollar,
         pointsRedeemed: pointsToRedeem,
       }),
-      { headers: { "Content-Type": "application/json" } }
+      {
+        headers: { "Content-Type": "application/json" },
+      }
     );
+
   } catch (err) {
+
     console.error("🔥 Redeem error:", err.message);
+
     return new Response(err.message, { status: 500 });
+
   }
 }
