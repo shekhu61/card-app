@@ -48,7 +48,7 @@ export async function loader({ request }) {
 
     console.log("🔐 Step 4: Authenticating with Rewards API");
 
-    const BASE_URL = "https://rewardsapi.centerforautism.com";
+    const BASE_URL = "https://stg-rewardsapi.centerforautism.com";
 
     console.log("🌐 Login URL:", `${BASE_URL}/Authentication/Login`);
 
