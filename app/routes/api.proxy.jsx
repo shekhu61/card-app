@@ -4,7 +4,7 @@ import prisma from "../db.server"; // Make sure this path points to your Prisma 
 /* ======================================================
    HARD-CODED REWARDS API CONFIG (NO ENV)
 ====================================================== */
-const BASE_URL = "https://stg-rewardsapi.centerforautism.com";
+const BASE_URL = "https://rewardsapi.centerforautism.com";
 const USERNAME = "admin";
 const PASSWORD = "admin";
 
