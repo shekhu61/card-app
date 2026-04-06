@@ -225,59 +225,73 @@ export async function loader({ request }) {
 
 
     /* ================= FETCH REMAINING POINTS ================= */
+    /* ================= FETCH REMAINING POINTS ================= */
 
-    console.log("📊 Step 7: Fetching updated remaining points");
+console.log("📊 Step 7: Fetching updated remaining points");
 
-    const defaultEmployeeRes = await fetch(
-      `${BASE_URL}/CardShopWrapper/GetEmployeeAddedPointsById?EmployeeID=${employeeId}`,
-      {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+const defaultEmployeeRes = await fetch(
+  `${BASE_URL}/CardShopWrapper/GetEmployeeAddedPointsById?EmployeeID=${employeeId}`,
+  {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  }
+);
 
-    console.log("📡 Remaining points API status:", defaultEmployeeRes.status);
+console.log("📡 Remaining points API status:", defaultEmployeeRes.status);
 
-    const employeeData = await defaultEmployeeRes.json();
+const employeeData = await defaultEmployeeRes.json();
 
-    console.log("📨 Employee points response:", employeeData);
+/* FULL RESPONSE LOG */
+console.log("📨 FULL Remaining Points API Response:");
+console.log(JSON.stringify(employeeData, null, 2));
 
-    const remainingPoints = employeeData.availablePoints;
+let remainingPoints = 0;
 
-    console.log("🪙 Remaining Points:", remainingPoints);
+/* HANDLE ARRAY RESPONSE */
+if (Array.isArray(employeeData) && employeeData.length > 0) {
+  if (employeeData[0].availablePoints !== undefined) {
+    remainingPoints = employeeData[0].availablePoints;
+  }
+}
+
+/* HANDLE OBJECT RESPONSE */
+if (!remainingPoints && employeeData.availablePoints !== undefined) {
+  remainingPoints = employeeData.availablePoints;
+}
+
+console.log("🪙 Remaining Points Extracted:", remainingPoints);
 
 
-    /* ================= UPDATE REMAINING POINTS METAFIELD ================= */
+/* ================= UPDATE REMAINING POINTS METAFIELD ================= */
 
-    console.log("🛒 Updating Shopify metafield custom.points_remain");
+console.log("🛒 Updating Shopify metafield custom.points_remain");
 
-    const remainingMetafieldRes = await fetch(
-      `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${shopifyOrderId}/metafields.json`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": SHOPIFY_TOKEN,
-        },
-        body: JSON.stringify({
-          metafield: {
-            namespace: "custom",
-            key: "points_remain",
-            value: remainingPoints.toString(),
-            type: "single_line_text_field",
-          },
-        }),
-      }
-    );
+const remainingMetafieldRes = await fetch(
+  `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${shopifyOrderId}/metafields.json`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+    },
+    body: JSON.stringify({
+      metafield: {
+        namespace: "custom",
+        key: "points_remain",
+        value: remainingPoints.toString(),
+        type: "single_line_text_field",
+      },
+    }),
+  }
+);
 
-    console.log("📡 Remaining metafield status:", remainingMetafieldRes.status);
+console.log("📡 Remaining metafield status:", remainingMetafieldRes.status);
 
-    const remainingMetaData = await remainingMetafieldRes.json();
+const remainingMetaData = await remainingMetafieldRes.json();
 
-    console.log("📝 Remaining metafield response:", remainingMetaData);
+console.log("📝 Remaining metafield response:", remainingMetaData);
 
-    console.log("✅ Remaining points metafield updated");
-
+console.log("✅ Remaining points metafield updated");
 
     /* ================= SUCCESS RESPONSE ================= */
 
