@@ -1,4 +1,4 @@
-
+import prisma from "../db.server";
 export async function loader({ request }) {
 
   console.log("======================================");
@@ -36,13 +36,72 @@ export async function loader({ request }) {
     console.log("🧾 Shopify Order Name:", orderId);
     console.log("🧾 Shopify Order Numeric ID:", shopifyOrderId);
 
+
+     console.log("💲 Calculating discount value...");
+
+    const values = raw.split(".0").filter(v => v !== "");
+    console.log("Split discount values:", values);
+
+    const discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
+
+    console.log("💲 Discount total:", discountAmount);
+
+    if (isNaN(discountAmount) || discountAmount <= 0) {
+      console.log("❌ Invalid discount amount");
+      return new Response("Invalid discount amount", { status: 400 });
+    }
+
     /* ================= FIXED POINTS ================= */
+ /* ================= LOAD REWARD RULE ================= */
 
-    console.log("🪙 Step 3: Setting fixed redeem points");
+    console.log("📊 Fetching reward rule from database...");
 
-    const pointsToRedeem = 15;
+    const rewardRule = await prisma.rewardRule.findFirst({
+      where: { isActive: true },
+      orderBy: { createdAt: "desc" },
+    });
 
-    console.log("🪙 Points to Redeem:", pointsToRedeem);
+    console.log("Reward Rule:", rewardRule);
+
+    if (!rewardRule) {
+      console.log("❌ No active reward rule found");
+      return new Response("No active reward rule found", { status: 500 });
+    }
+
+
+    /* ================= CALCULATE POINTS ================= */
+
+    const { basePoints: a } = rewardRule;
+    const pointsPerDollar = a;
+
+    console.log("Base points per dollar:", a);
+
+    if (typeof a !== "number" || a <= 0) {
+      console.log("❌ Invalid reward rule configuration");
+      return new Response("Invalid reward rule configuration", { status: 500 });
+    }
+
+    console.log("🧮 Calculating redeem points...");
+
+    let pointsToRedeem = Math.round(discountAmount * a);
+
+    console.log("Raw points:", pointsToRedeem);
+
+    const remainder = pointsToRedeem % 5;
+
+    console.log("Remainder after modulo 5:", remainder);
+
+    if (remainder !== 0) {
+      pointsToRedeem += (5 - remainder);
+    }
+
+    console.log("🪙 Final points to redeem:", pointsToRedeem);
+
+    if (pointsToRedeem <= 0) {
+      console.log("❌ Calculated points invalid");
+      return new Response("Calculated points invalid", { status: 400 });
+    }
+
 
     /* ================= LOGIN ================= */
 
@@ -194,3 +253,6 @@ export async function loader({ request }) {
   }
 
 }
+
+
+
