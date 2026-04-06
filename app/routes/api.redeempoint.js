@@ -229,37 +229,27 @@ export async function loader({ request }) {
 
 console.log("📊 Step 7: Fetching updated remaining points");
 
-const defaultEmployeeRes = await fetch(
-  `${BASE_URL}/CardShopWrapper/GetEmployeeAddedPointsById?EmployeeID=${employeeId}`,
+const pointsRes = await fetch(
+  `${BASE_URL}/CardShopWrapper/GetEmployeePoints?EmployeeID=${employeeId}`,
   {
     method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   }
 );
 
-console.log("📡 Remaining points API status:", defaultEmployeeRes.status);
+console.log("📡 Employee points API status:", pointsRes.status);
 
-const employeeData = await defaultEmployeeRes.json();
+const pointsData = await pointsRes.json();
 
-/* FULL RESPONSE LOG */
-console.log("📨 FULL Remaining Points API Response:");
-console.log(JSON.stringify(employeeData, null, 2));
+/* FULL API RESPONSE LOG */
+console.log("📨 Employee Points Result:", pointsData);
 
-let remainingPoints = 0;
+/* EXTRACT AVAILABLE POINTS */
+const remainingPoints = pointsData.availablePoints;
 
-/* HANDLE ARRAY RESPONSE */
-if (Array.isArray(employeeData) && employeeData.length > 0) {
-  if (employeeData[0].availablePoints !== undefined) {
-    remainingPoints = employeeData[0].availablePoints;
-  }
-}
-
-/* HANDLE OBJECT RESPONSE */
-if (!remainingPoints && employeeData.availablePoints !== undefined) {
-  remainingPoints = employeeData.availablePoints;
-}
-
-console.log("🪙 Remaining Points Extracted:", remainingPoints);
+console.log("🪙 Remaining Points:", remainingPoints);
 
 
 /* ================= UPDATE REMAINING POINTS METAFIELD ================= */
