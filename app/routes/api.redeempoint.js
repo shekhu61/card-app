@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+
 export async function loader({ request }) {
 
   console.log("======================================");
@@ -37,7 +38,7 @@ export async function loader({ request }) {
     console.log("🧾 Shopify Order Numeric ID:", shopifyOrderId);
 
 
-     console.log("💲 Calculating discount value...");
+    console.log("💲 Calculating discount value...");
 
     const values = raw.split(".0").filter(v => v !== "");
     console.log("Split discount values:", values);
@@ -51,8 +52,7 @@ export async function loader({ request }) {
       return new Response("Invalid discount amount", { status: 400 });
     }
 
-    /* ================= FIXED POINTS ================= */
- /* ================= LOAD REWARD RULE ================= */
+    /* ================= LOAD REWARD RULE ================= */
 
     console.log("📊 Fetching reward rule from database...");
 
@@ -67,7 +67,6 @@ export async function loader({ request }) {
       console.log("❌ No active reward rule found");
       return new Response("No active reward rule found", { status: 500 });
     }
-
 
     /* ================= CALCULATE POINTS ================= */
 
@@ -101,7 +100,6 @@ export async function loader({ request }) {
       console.log("❌ Calculated points invalid");
       return new Response("Calculated points invalid", { status: 400 });
     }
-
 
     /* ================= LOGIN ================= */
 
@@ -225,9 +223,65 @@ export async function loader({ request }) {
 
     console.log("✅ Shopify metafield updated");
 
+
+    /* ================= FETCH REMAINING POINTS ================= */
+
+    console.log("📊 Step 7: Fetching updated remaining points");
+
+    const defaultEmployeeRes = await fetch(
+      `${BASE_URL}/CardShopWrapper/GetEmployeeAddedPointsById?EmployeeID=${employeeId}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    console.log("📡 Remaining points API status:", defaultEmployeeRes.status);
+
+    const employeeData = await defaultEmployeeRes.json();
+
+    console.log("📨 Employee points response:", employeeData);
+
+    const remainingPoints = employeeData.availablePoints;
+
+    console.log("🪙 Remaining Points:", remainingPoints);
+
+
+    /* ================= UPDATE REMAINING POINTS METAFIELD ================= */
+
+    console.log("🛒 Updating Shopify metafield custom.points_remain");
+
+    const remainingMetafieldRes = await fetch(
+      `https://${SHOPIFY_STORE}/admin/api/2026-01/orders/${shopifyOrderId}/metafields.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+        },
+        body: JSON.stringify({
+          metafield: {
+            namespace: "custom",
+            key: "points_remain",
+            value: remainingPoints.toString(),
+            type: "single_line_text_field",
+          },
+        }),
+      }
+    );
+
+    console.log("📡 Remaining metafield status:", remainingMetafieldRes.status);
+
+    const remainingMetaData = await remainingMetafieldRes.json();
+
+    console.log("📝 Remaining metafield response:", remainingMetaData);
+
+    console.log("✅ Remaining points metafield updated");
+
+
     /* ================= SUCCESS RESPONSE ================= */
 
-    console.log("🎉 Step 7: Process completed successfully");
+    console.log("🎉 Step 8: Process completed successfully");
 
     return new Response(
       JSON.stringify({
@@ -235,6 +289,7 @@ export async function loader({ request }) {
         orderId,
         employeeId,
         pointsRedeemed: pointsToRedeem,
+        remainingPoints
       }),
       {
         headers: { "Content-Type": "application/json" },
@@ -253,6 +308,3 @@ export async function loader({ request }) {
   }
 
 }
-
-
-
