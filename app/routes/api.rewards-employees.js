@@ -145,7 +145,7 @@ async function getCustomerByEmail(email) {
 /* ========================================================
    UPDATE CUSTOMER
 ======================================================== */
-async function updateCustomer(customerId, existingTags = [], employeeID) {
+async function updateCustomer(customerId, existingTags = [], employeeID, officeLocation) {
   const mutation = `
     mutation updateCustomer($input: CustomerInput!) {
       customerUpdate(input: $input) {
@@ -172,7 +172,7 @@ async function updateCustomer(customerId, existingTags = [], employeeID) {
         namespace: "custom",
         key: "office_location",
         type: "single_line_text_field",
-        value: "US ME Portland ME",
+        value: officeLocation || "",
       },
     ],
   };
@@ -183,7 +183,7 @@ async function updateCustomer(customerId, existingTags = [], employeeID) {
 /* ========================================================
    CREATE CUSTOMER
 ======================================================== */
-async function createCustomer(firstName, lastName, email, employeeID) {
+async function createCustomer(firstName, lastName, email, employeeID, officeLocation) {
   const mutation = `
     mutation createCustomer($input: CustomerInput!) {
       customerCreate(input: $input) {
@@ -209,7 +209,7 @@ async function createCustomer(firstName, lastName, email, employeeID) {
         namespace: "custom",
         key: "office_location",
         type: "single_line_text_field",
-        value: "US ME Portland ME",
+        value: officeLocation || "",
       },
     ],
   };
@@ -230,7 +230,7 @@ async function runEmployeeSync() {
   let failed = 0;
 
   for (const emp of employees) {
-    const { firstName, lastName, emailAddress, employeeID } = emp;
+    const { firstName, lastName, emailAddress, employeeID, officeLocation } = emp;
 
     if (!emailAddress) continue;
 
@@ -241,7 +241,8 @@ async function runEmployeeSync() {
         const result = await updateCustomer(
           existingCustomer.id,
           existingCustomer.tags,
-          employeeID
+          employeeID,
+          officeLocation
         );
 
         const errors = result?.data?.customerUpdate?.userErrors;
@@ -255,7 +256,8 @@ async function runEmployeeSync() {
         firstName,
         lastName,
         emailAddress,
-        employeeID
+        employeeID,
+        officeLocation
       );
 
       const errors = result?.data?.customerCreate?.userErrors;
