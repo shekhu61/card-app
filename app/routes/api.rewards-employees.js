@@ -118,6 +118,46 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 /* ========================================================
+   SET CUSTOMER METAFIELDS (FORCE UPDATE)
+======================================================== */
+async function setCustomerMetafields(customerId, employeeID, officeLocation) {
+  const mutation = `
+    mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields {
+          key
+          namespace
+          value
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  const metafields = [
+    {
+      ownerId: customerId,
+      namespace: "custom",
+      key: "employeeid",
+      type: "single_line_text_field",
+      value: String(employeeID),
+    },
+    {
+      ownerId: customerId,
+      namespace: "custom",
+      key: "office_location",
+      type: "single_line_text_field",
+      value: officeLocation || "",
+    },
+  ];
+
+  return shopifyGraphQL(mutation, { metafields });
+}
+
+/* ========================================================
    GET CUSTOMER BY EMAIL
 ======================================================== */
 async function getCustomerByEmail(email) {
@@ -156,28 +196,21 @@ async function updateCustomer(customerId, existingTags = [], employeeID, officeL
   `;
 
   const tagsSet = new Set(existingTags || []);
-  tagsSet.add("pts"); // ensure pts tag exists
+  tagsSet.add("pts");
 
   const input = {
     id: customerId,
     tags: Array.from(tagsSet),
-    metafields: [
-      {
-        namespace: "custom",
-        key: "employeeid",
-        type: "single_line_text_field",
-        value: String(employeeID),
-      },
-      {
-        namespace: "custom",
-        key: "office_location",
-        type: "single_line_text_field",
-        value: officeLocation || "",
-      },
-    ],
   };
 
-  return shopifyGraphQL(mutation, { input });
+  const result = await shopifyGraphQL(mutation, { input });
+
+  // ✅ ALWAYS overwrite metafields
+  await setCustomerMetafields(customerId, employeeID, officeLocation);
+
+  console.log(`📍 Updated office for customer ${customerId}: ${officeLocation}`);
+
+  return result;
 }
 
 /* ========================================================
@@ -198,23 +231,18 @@ async function createCustomer(firstName, lastName, email, employeeID, officeLoca
     lastName,
     email,
     tags: ["pts"],
-    metafields: [
-      {
-        namespace: "custom",
-        key: "employeeid",
-        type: "single_line_text_field",
-        value: String(employeeID),
-      },
-      {
-        namespace: "custom",
-        key: "office_location",
-        type: "single_line_text_field",
-        value: officeLocation || "",
-      },
-    ],
   };
 
-  return shopifyGraphQL(mutation, { input });
+  const result = await shopifyGraphQL(mutation, { input });
+
+  const customerId = result?.data?.customerCreate?.customer?.id;
+
+  if (customerId) {
+    await setCustomerMetafields(customerId, employeeID, officeLocation);
+    console.log(`🆕 Created + set office for ${email}: ${officeLocation}`);
+  }
+
+  return result;
 }
 
 /* ========================================================
