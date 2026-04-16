@@ -117,6 +117,9 @@ async function getAllPtsCustomers() {
             metafield(namespace:"custom", key:"employeeid") {
               value
             }
+              officeLocation: metafield(namespace:"custom", key:"office_location") {
+             value
+              }
           }
         }
         pageInfo { hasNextPage }
@@ -134,7 +137,8 @@ async function getAllPtsCustomers() {
         email: e.node.email,
         firstName: e.node.firstName,
         lastName: e.node.lastName,
-        employeeId: e.node.metafield?.value || null
+        employeeId: e.node.metafield?.value || null,
+        officeLocation: e.node.officeLocation?.value || null
       });
 
     });
@@ -198,7 +202,7 @@ async function getCustomerByEmail(email) {
 CREATE CUSTOMER
 ======================================================== */
 
-async function createCustomer(firstName,lastName,email,employeeId) {
+async function createCustomer(firstName, lastName, email, employeeId, officeLocation) {
 
   const mutation = `
   mutation ($input: CustomerInput!) {
@@ -224,7 +228,7 @@ async function createCustomer(firstName,lastName,email,employeeId) {
         namespace:"custom",
         key:"office_location",
         type:"single_line_text_field",
-        value:"US ME Portland ME"
+        value: officeLocation || ""
       }
     ]
   };
@@ -237,7 +241,7 @@ async function createCustomer(firstName,lastName,email,employeeId) {
 UPDATE METAFIELDS
 ======================================================== */
 
-async function updateMetafields(customerId, employeeId) {
+async function updateMetafields(customerId, employeeId, officeLocation) {
 
   const mutation = `
   mutation ($input: CustomerInput!) {
@@ -260,7 +264,7 @@ async function updateMetafields(customerId, employeeId) {
         namespace:"custom",
         key:"office_location",
         type:"single_line_text_field",
-        value:"US ME Portland ME"
+        value: officeLocation || ""
       }
     ]
   };
@@ -303,7 +307,8 @@ async function runAliasSync() {
           cust.firstName,
           cust.lastName,
           aliasEmail,
-          cust.employeeId
+          cust.employeeId,
+          cust.officeLocation
         );
 
         console.log("Created proxy customer:", aliasEmail);
@@ -312,7 +317,7 @@ async function runAliasSync() {
 
       } else {
 
-        await updateMetafields(existing.id, cust.employeeId);
+        await updateMetafields(existing.id, cust.employeeId, cust.officeLocation);
 
         console.log("Updated proxy metafields:", aliasEmail);
 
