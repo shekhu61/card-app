@@ -2,14 +2,14 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
 /* ======================================================
-   CONFIG
+   HARD-CODED REWARDS API CONFIG
 ====================================================== */
 const BASE_URL = "https://rewardsapi.centerforautism.com";
 const USERNAME = "admin";
 const PASSWORD = "admin";
 
 /* ======================================================
-   MAIN ACTION
+   APP PROXY ENTRY
 ====================================================== */
 export async function action({ request }) {
   console.log("🔵 App Proxy hit");
@@ -17,6 +17,9 @@ export async function action({ request }) {
   try {
     const { admin } = await authenticate.public.appProxy(request);
 
+    /* ----------------------------------------------
+       READ FRONTEND DATA
+    ---------------------------------------------- */
     const { employeeId, email } = await request.json();
 
     if (!employeeId || !email) {
@@ -26,18 +29,27 @@ export async function action({ request }) {
       );
     }
 
+    console.log("🆔 Employee ID:", employeeId);
+    console.log("📧 Email:", email);
+
     /* ----------------------------------------------
-       LOGIN
+       LOGIN TO REWARDS API
     ---------------------------------------------- */
     const token = await loginAndGetToken();
 
     /* ----------------------------------------------
-       FETCH POINTS
+       FETCH EMPLOYEE POINTS
     ---------------------------------------------- */
-    const [pointsData, defaultEmployeePoints] = await Promise.all([
-      fetchAPI(`/CardShopWrapper/GetEmployeePoints?EmployeeID=${employeeId}`, token),
-      fetchAPI(`/CardShopWrapper/GetEmployeeAddedPointsById?EmployeeID=${employeeId}`, token),
-    ]);
+    const pointsRes = await fetch(
+      `${BASE_URL}/CardShopWrapper/GetEmployeePoints?EmployeeID=${employeeId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    if (!pointsRes.ok) throw new Error("Employee points API failed");
+
+    const pointsData = await pointsRes.json();
 
     const {
       employeeID,
@@ -49,95 +61,131 @@ export async function action({ request }) {
     } = pointsData;
 
     /* ----------------------------------------------
-       REWARD RULE
+       FETCH REWARD RULE
     ---------------------------------------------- */
     const rewardRule = await prisma.rewardRule.findFirst({
       where: { isActive: true },
       orderBy: { createdAt: "desc" },
     });
 
-    if (!rewardRule?.basePoints) {
-      throw new Error("Invalid reward rule");
+    if (!rewardRule) throw new Error("No active reward rule found");
+
+    const { basePoints: a } = rewardRule;
+
+    if (!a || a <= 0) {
+      throw new Error("Invalid reward rule configuration");
     }
 
     const points = Number(availablePoints) || 0;
-    const coins = (points / rewardRule.basePoints).toFixed(2);
+    const coins = (points / a).toFixed(2);
 
-    if (Number(coins) <= 0) {
-      throw new Error("Invalid discount amount (coins <= 0)");
-    }
-
-    console.log("💰 Coins:", coins);
+    console.log(`💰 Coins: ${coins}`);
 
     /* ----------------------------------------------
-       GET CUSTOMER
+       GET SHOPIFY CUSTOMER
     ---------------------------------------------- */
-    const customer = await getCustomerByEmail(admin, email);
+    const customerRes = await admin.graphql(
+      `
+      query ($query: String!) {
+        customers(first: 1, query: $query) {
+          nodes {
+            id
+            metafield(namespace: "custom", key: "discount_id") {
+              value
+            }
+          }
+        }
+      }
+      `,
+      { variables: { query: `email:${email}` } }
+    );
 
-    if (!customer?.id) {
-      throw new Error("Customer not found");
-    }
+    const customerJson = await customerRes.json();
+    const customer = customerJson.data.customers.nodes[0];
+
+    if (!customer) throw new Error("Customer not found");
 
     const shopifyCustomerId = customer.id;
-    let discountId = getMetafieldValue(customer, "discount_id");
+    let discountId = customer.metafield?.value;
 
     const discountCode = `PTS-${email.split("@")[0].toUpperCase()}`;
+
+    console.log("🎟️ Discount Code:", discountCode);
+    console.log("🆔 Existing Discount ID:", discountId);
 
     /* ----------------------------------------------
        CREATE OR UPDATE DISCOUNT
     ---------------------------------------------- */
     if (!discountId) {
-      console.log("➕ Creating discount");
+      console.log("➕ Creating new discount");
 
-      const res = await admin.graphql(
+      const createRes = await admin.graphql(
         `
         mutation ($input: DiscountCodeBasicInput!) {
           discountCodeBasicCreate(basicCodeDiscount: $input) {
-            discountCodeBasic { id }
-            userErrors { field message }
+            codeDiscountNode {
+              id
+            }
+            userErrors {
+              message
+            }
           }
         }
         `,
         {
           variables: {
-            input: buildDiscountInput({
-              discountCode,
-              shopifyCustomerId,
-              coins,
-            }),
+            input: {
+              title: discountCode,
+              code: discountCode,
+              startsAt: new Date().toISOString(),
+              customerSelection: {
+                customers: { add: [shopifyCustomerId] },
+              },
+              customerGets: {
+                items: { all: true },
+                value: {
+                  discountAmount: {
+                    amount: String(coins),
+                    appliesOnEachItem: false,
+                  },
+                },
+              },
+              usageLimit: 1000,
+              appliesOncePerCustomer: false,
+              combinesWith: {
+                shippingDiscounts: true,
+                orderDiscounts: false,
+                productDiscounts: false,
+              },
+            },
           },
         }
       );
 
-      const json = await res.json();
-      console.log("📦 CREATE RESPONSE:", JSON.stringify(json, null, 2));
+      const createJson = await createRes.json();
 
-      handleGraphQLErrors(json);
+      const errors =
+        createJson.data.discountCodeBasicCreate.userErrors;
 
-      const errors = json.data.discountCodeBasicCreate.userErrors;
       if (errors.length) {
-        const msg = errors.map((e) => e.message).join(", ");
-
-        // Handle duplicate code
-        if (msg.toLowerCase().includes("already")) {
-          throw new Error(
-            "Discount already exists but discount_id metafield is missing"
-          );
-        }
-
-        throw new Error(msg);
+        console.error(errors);
+        throw new Error(errors[0].message);
       }
 
       discountId =
-        json.data.discountCodeBasicCreate.discountCodeBasic.id;
-    } else {
-      console.log("✏️ Updating discount");
+        createJson.data.discountCodeBasicCreate.codeDiscountNode.id;
 
-      const res = await admin.graphql(
+      console.log("✅ Created Discount ID:", discountId);
+    } else {
+      console.log("✏️ Updating existing discount");
+
+      const updateRes = await admin.graphql(
         `
         mutation ($id: ID!, $input: DiscountCodeBasicInput!) {
           discountCodeBasicUpdate(id: $id, basicCodeDiscount: $input) {
-            userErrors { field message }
+            userErrors {
+              message
+            }
           }
         }
         `,
@@ -145,8 +193,6 @@ export async function action({ request }) {
           variables: {
             id: discountId,
             input: {
-              title: discountCode,
-              startsAt: new Date().toISOString(),
               customerGets: {
                 items: { all: true },
                 value: {
@@ -161,28 +207,66 @@ export async function action({ request }) {
         }
       );
 
-      const json = await res.json();
-      console.log("📦 UPDATE RESPONSE:", JSON.stringify(json, null, 2));
+      const updateJson = await updateRes.json();
 
-      handleGraphQLErrors(json);
+      const errors =
+        updateJson.data.discountCodeBasicUpdate.userErrors;
 
-      const errors = json.data.discountCodeBasicUpdate.userErrors;
       if (errors.length) {
-        throw new Error(errors.map((e) => e.message).join(", "));
+        console.error(errors);
+        throw new Error(errors[0].message);
       }
+
+      console.log("✅ Discount updated");
     }
 
     /* ----------------------------------------------
-       UPDATE METAFIELDS
+       UPDATE CUSTOMER METAFIELDS
     ---------------------------------------------- */
-    await updateCustomerMetafields(admin, shopifyCustomerId, [
-      { key: "coins", value: String(availablePoints) },
-      { key: "discount_code", value: discountCode },
-      { key: "discount_id", value: discountId },
-    ]);
+    console.log("🧾 Updating metafields");
 
-    console.log("✅ Sync complete");
+    await admin.graphql(
+      `
+      mutation ($input: CustomerInput!) {
+        customerUpdate(input: $input) {
+          userErrors { message }
+        }
+      }
+      `,
+      {
+        variables: {
+          input: {
+            id: shopifyCustomerId,
+            metafields: [
+              {
+                namespace: "custom",
+                key: "coins",
+                type: "single_line_text_field",
+                value: String(availablePoints),
+              },
+              {
+                namespace: "custom",
+                key: "discount_code",
+                type: "single_line_text_field",
+                value: discountCode,
+              },
+              {
+                namespace: "custom",
+                key: "discount_id",
+                type: "single_line_text_field",
+                value: discountId,
+              },
+            ],
+          },
+        },
+      }
+    );
 
+    console.log("✅ Sync completed");
+
+    /* ----------------------------------------------
+       RESPONSE
+    ---------------------------------------------- */
     return Response.json({
       success: true,
       employeeID,
@@ -193,7 +277,6 @@ export async function action({ request }) {
       addedPoints,
       coins,
       discountCode,
-      defaultEmployeePoints,
     });
   } catch (error) {
     console.error("❌ Proxy Error:", error);
@@ -206,114 +289,11 @@ export async function action({ request }) {
 }
 
 /* ======================================================
-   HELPERS
-====================================================== */
-
-function handleGraphQLErrors(json) {
-  if (json.errors) {
-    console.error("❌ GraphQL Errors:", JSON.stringify(json.errors, null, 2));
-    throw new Error("GraphQL top-level error");
-  }
-}
-
-async function fetchAPI(endpoint, token) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) throw new Error(`API failed: ${endpoint}`);
-
-  return res.json();
-}
-
-async function getCustomerByEmail(admin, email) {
-  const res = await admin.graphql(
-    `
-    query ($query: String!) {
-      customers(first: 1, query: $query) {
-        nodes {
-          id
-          metafields(first: 20) {
-            nodes { key value }
-          }
-        }
-      }
-    }
-    `,
-    { variables: { query: `email:${email}` } }
-  );
-
-  const json = await res.json();
-  handleGraphQLErrors(json);
-
-  return json.data.customers.nodes[0];
-}
-
-function getMetafieldValue(customer, key) {
-  return (
-    customer.metafields?.nodes?.find((m) => m.key === key)?.value || null
-  );
-}
-
-function buildDiscountInput({ discountCode, shopifyCustomerId, coins }) {
-  return {
-    title: discountCode,
-    code: discountCode,
-    startsAt: new Date().toISOString(),
-    customerSelection: {
-      customers: { add: [shopifyCustomerId] },
-    },
-    customerGets: {
-      items: { all: true },
-      value: {
-        discountAmount: {
-          amount: String(coins),
-          appliesOnEachItem: false,
-        },
-      },
-    },
-    usageLimit: 1000,
-    appliesOncePerCustomer: false,
-    combinesWith: {
-      shippingDiscounts: true,
-      orderDiscounts: false,
-      productDiscounts: false,
-    },
-  };
-}
-
-async function updateCustomerMetafields(admin, customerId, metafields) {
-  const res = await admin.graphql(
-    `
-    mutation ($input: CustomerInput!) {
-      customerUpdate(input: $input) {
-        userErrors { message }
-      }
-    }
-    `,
-    {
-      variables: {
-        input: {
-          id: customerId,
-          metafields: metafields.map((m) => ({
-            namespace: "custom",
-            key: m.key,
-            type: "single_line_text_field",
-            value: m.value,
-          })),
-        },
-      },
-    }
-  );
-
-  const json = await res.json();
-  handleGraphQLErrors(json);
-}
-
-/* ======================================================
-   LOGIN
+   LOGIN FUNCTION
 ====================================================== */
 async function loginAndGetToken() {
+  console.log("🔐 Logging into Rewards API");
+
   const res = await fetch(`${BASE_URL}/Authentication/Login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -323,8 +303,13 @@ async function loginAndGetToken() {
     }),
   });
 
-  if (!res.ok) throw new Error("Rewards login failed");
+  if (!res.ok) {
+    throw new Error("Rewards API login failed");
+  }
 
   const data = await res.json();
+
+  console.log("🔑 Token received");
+
   return data.token;
 }
