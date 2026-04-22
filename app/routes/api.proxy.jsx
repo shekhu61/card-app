@@ -2,7 +2,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
 /* ======================================================
-   HARD-CODED REWARDS API CONFIG
+   HARD-CODED REWARDS API CONFIG (NO ENV)
 ====================================================== */
 const BASE_URL = "https://rewardsapi.centerforautism.com";
 const USERNAME = "admin";
@@ -22,15 +22,15 @@ export async function action({ request }) {
     ---------------------------------------------- */
     const { employeeId, email } = await request.json();
 
+    console.log("🆔 Employee ID:", employeeId);
+    console.log("📧 Customer Email:", email);
+
     if (!employeeId || !email) {
       return Response.json(
         { error: "Employee ID or email missing" },
         { status: 400 }
       );
     }
-
-    console.log("🆔 Employee ID:", employeeId);
-    console.log("📧 Email:", email);
 
     /* ----------------------------------------------
        LOGIN TO REWARDS API
@@ -43,13 +43,33 @@ export async function action({ request }) {
     const pointsRes = await fetch(
       `${BASE_URL}/CardShopWrapper/GetEmployeePoints?EmployeeID=${employeeId}`,
       {
+        method: "GET",
         headers: { Authorization: `Bearer ${token}` },
       }
     );
 
-    if (!pointsRes.ok) throw new Error("Employee points API failed");
+    if (!pointsRes.ok) {
+      throw new Error("Employee points API failed");
+    }
 
     const pointsData = await pointsRes.json();
+
+    /* ----------------------------------------------
+       FETCH DEFAULT EMPLOYEE POINTS
+    ---------------------------------------------- */
+    const defaultEmployeeRes = await fetch(
+      `${BASE_URL}/CardShopWrapper/GetEmployeeAddedPointsById?EmployeeID=${employeeId}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    if (!defaultEmployeeRes.ok) {
+      throw new Error("Default employee points API failed");
+    }
+
+    const defaultEmployeePoints = await defaultEmployeeRes.json();
 
     const {
       employeeID,
@@ -61,74 +81,133 @@ export async function action({ request }) {
     } = pointsData;
 
     /* ----------------------------------------------
-       FETCH REWARD RULE
+       FETCH ACTIVE REWARD RULE FROM DB
     ---------------------------------------------- */
     const rewardRule = await prisma.rewardRule.findFirst({
       where: { isActive: true },
       orderBy: { createdAt: "desc" },
     });
 
-    if (!rewardRule) throw new Error("No active reward rule found");
+    if (!rewardRule) {
+      throw new Error("No active reward rule found");
+    }
 
+    /* ----------------------------------------------
+       CALCULATE DISCOUNT
+    ---------------------------------------------- */
     const { basePoints: a } = rewardRule;
 
-    if (!a || a <= 0) {
+    if (typeof a !== "number" || a <= 0) {
       throw new Error("Invalid reward rule configuration");
     }
 
     const points = Number(availablePoints) || 0;
     const coins = (points / a).toFixed(2);
 
-    console.log(`💰 Coins: ${coins}`);
+    console.log(`💰 Discount calculated: $${coins}`);
 
     /* ----------------------------------------------
-       GET SHOPIFY CUSTOMER
+       FETCH SHOPIFY CUSTOMER ID BY EMAIL
     ---------------------------------------------- */
     const customerRes = await admin.graphql(
       `
       query ($query: String!) {
         customers(first: 1, query: $query) {
-          nodes {
-            id
-            metafield(namespace: "custom", key: "discount_id") {
-              value
-            }
-          }
+          nodes { id }
         }
       }
       `,
       { variables: { query: `email:${email}` } }
     );
 
-    const customerJson = await customerRes.json();
-    const customer = customerJson.data.customers.nodes[0];
+    const customerData = await customerRes.json();
+    const shopifyCustomerId = customerData.data.customers.nodes[0]?.id;
 
-    if (!customer) throw new Error("Customer not found");
-
-    const shopifyCustomerId = customer.id;
-    let discountId = customer.metafield?.value;
-
-    const discountCode = `PTS-${email.split("@")[0].toUpperCase()}`;
-
-    console.log("🎟️ Discount Code:", discountCode);
-    console.log("🆔 Existing Discount ID:", discountId);
+    if (!shopifyCustomerId) {
+      throw new Error("Shopify customer not found");
+    }
 
     /* ----------------------------------------------
-       CREATE OR UPDATE DISCOUNT
+       DISCOUNT CODE LOGIC
     ---------------------------------------------- */
-    if (!discountId) {
-      console.log("➕ Creating new discount");
+    const discountCode = `PTS-${email.split("@")[0].toUpperCase()}`;
+    console.log("🎟️ Discount Code:", discountCode);
 
-      const createRes = await admin.graphql(
+    /* ----------------------------------------------
+       PAGINATION SAFE SEARCH
+    ---------------------------------------------- */
+    console.log("🔍 Searching for discount...");
+
+    let discountNode = null;
+    let hasNextPage = true;
+    let cursor = null;
+
+    while (hasNextPage && !discountNode) {
+      console.log("🔄 Fetching next page...");
+
+      const discountSearchRes = await admin.graphql(
+        `
+        query ($cursor: String) {
+          codeDiscountNodes(first: 50, after: $cursor) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              id
+              codeDiscount {
+                ... on DiscountCodeBasic {
+                  codes(first: 50) {
+                    nodes {
+                      code
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        `,
+        { variables: { cursor } }
+      );
+
+      const discountSearchData = await discountSearchRes.json();
+
+      const nodes = discountSearchData.data.codeDiscountNodes.nodes;
+
+      for (const node of nodes) {
+        const codes = node.codeDiscount?.codes?.nodes || [];
+
+        if (codes.some((c) => c.code === discountCode)) {
+          discountNode = node;
+          break;
+        }
+      }
+
+      hasNextPage =
+        discountSearchData.data.codeDiscountNodes.pageInfo.hasNextPage;
+
+      cursor =
+        discountSearchData.data.codeDiscountNodes.pageInfo.endCursor;
+    }
+
+    if (discountNode) {
+      console.log("✅ Discount found:", discountNode.id);
+    } else {
+      console.log("❌ Discount not found, will create new");
+    }
+
+    /* ----------------------------------------------
+       CREATE / UPDATE DISCOUNT
+    ---------------------------------------------- */
+    if (!discountNode) {
+      console.log("➕ Creating discount");
+
+      await admin.graphql(
         `
         mutation ($input: DiscountCodeBasicInput!) {
           discountCodeBasicCreate(basicCodeDiscount: $input) {
-            codeDiscountNode {
-              id
-            }
-            userErrors {
-              message
-            }
+            userErrors { message }
           }
         }
         `,
@@ -161,37 +240,20 @@ export async function action({ request }) {
           },
         }
       );
-
-      const createJson = await createRes.json();
-
-      const errors =
-        createJson.data.discountCodeBasicCreate.userErrors;
-
-      if (errors.length) {
-        console.error(errors);
-        throw new Error(errors[0].message);
-      }
-
-      discountId =
-        createJson.data.discountCodeBasicCreate.codeDiscountNode.id;
-
-      console.log("✅ Created Discount ID:", discountId);
     } else {
-      console.log("✏️ Updating existing discount");
+      console.log("✏️ Updating discount");
 
-      const updateRes = await admin.graphql(
+      await admin.graphql(
         `
         mutation ($id: ID!, $input: DiscountCodeBasicInput!) {
           discountCodeBasicUpdate(id: $id, basicCodeDiscount: $input) {
-            userErrors {
-              message
-            }
+            userErrors { message }
           }
         }
         `,
         {
           variables: {
-            id: discountId,
+            id: discountNode.id,
             input: {
               customerGets: {
                 items: { all: true },
@@ -206,24 +268,12 @@ export async function action({ request }) {
           },
         }
       );
-
-      const updateJson = await updateRes.json();
-
-      const errors =
-        updateJson.data.discountCodeBasicUpdate.userErrors;
-
-      if (errors.length) {
-        console.error(errors);
-        throw new Error(errors[0].message);
-      }
-
-      console.log("✅ Discount updated");
     }
 
     /* ----------------------------------------------
        UPDATE CUSTOMER METAFIELDS
     ---------------------------------------------- */
-    console.log("🧾 Updating metafields");
+    console.log("🧾 Updating customer metafields");
 
     await admin.graphql(
       `
@@ -250,23 +300,14 @@ export async function action({ request }) {
                 type: "single_line_text_field",
                 value: discountCode,
               },
-              {
-                namespace: "custom",
-                key: "discount_id",
-                type: "single_line_text_field",
-                value: discountId,
-              },
             ],
           },
         },
       }
     );
 
-    console.log("✅ Sync completed");
+    console.log("✅ Sync completed for", email);
 
-    /* ----------------------------------------------
-       RESPONSE
-    ---------------------------------------------- */
     return Response.json({
       success: true,
       employeeID,
@@ -275,8 +316,10 @@ export async function action({ request }) {
       totalEarnedPoints,
       redeemedPoints,
       addedPoints,
+      email,
       coins,
       discountCode,
+      defaultEmployeePoints,
     });
   } catch (error) {
     console.error("❌ Proxy Error:", error);
@@ -289,7 +332,7 @@ export async function action({ request }) {
 }
 
 /* ======================================================
-   LOGIN FUNCTION
+   REWARDS LOGIN
 ====================================================== */
 async function loginAndGetToken() {
   console.log("🔐 Logging into Rewards API");
@@ -308,7 +351,6 @@ async function loginAndGetToken() {
   }
 
   const data = await res.json();
-
   console.log("🔑 Token received");
 
   return data.token;
