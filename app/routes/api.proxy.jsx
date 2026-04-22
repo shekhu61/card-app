@@ -27,7 +27,7 @@ export async function action({ request }) {
     }
 
     /* ----------------------------------------------
-       LOGIN → TOKEN
+       LOGIN
     ---------------------------------------------- */
     const token = await loginAndGetToken();
 
@@ -63,10 +63,14 @@ export async function action({ request }) {
     const points = Number(availablePoints) || 0;
     const coins = (points / rewardRule.basePoints).toFixed(2);
 
+    if (Number(coins) <= 0) {
+      throw new Error("Invalid discount amount (coins <= 0)");
+    }
+
     console.log("💰 Coins:", coins);
 
     /* ----------------------------------------------
-       GET SHOPIFY CUSTOMER
+       GET CUSTOMER
     ---------------------------------------------- */
     const customer = await getCustomerByEmail(admin, email);
 
@@ -75,26 +79,22 @@ export async function action({ request }) {
     }
 
     const shopifyCustomerId = customer.id;
+    let discountId = getMetafieldValue(customer, "discount_id");
 
-    /* ----------------------------------------------
-       DISCOUNT CODE
-    ---------------------------------------------- */
     const discountCode = `PTS-${email.split("@")[0].toUpperCase()}`;
 
     /* ----------------------------------------------
-       CHECK EXISTING DISCOUNT ID (METAFIELD)
+       CREATE OR UPDATE DISCOUNT
     ---------------------------------------------- */
-    let discountId = getMetafieldValue(customer, "discount_id");
-
     if (!discountId) {
-      console.log("➕ Creating new discount");
+      console.log("➕ Creating discount");
 
-      const createRes = await admin.graphql(
+      const res = await admin.graphql(
         `
         mutation ($input: DiscountCodeBasicInput!) {
           discountCodeBasicCreate(basicCodeDiscount: $input) {
             discountCodeBasic { id }
-            userErrors { message }
+            userErrors { field message }
           }
         }
         `,
@@ -109,23 +109,35 @@ export async function action({ request }) {
         }
       );
 
-      const json = await createRes.json();
+      const json = await res.json();
+      console.log("📦 CREATE RESPONSE:", JSON.stringify(json, null, 2));
 
-      if (json.data.discountCodeBasicCreate.userErrors.length) {
-        throw new Error(
-          JSON.stringify(json.data.discountCodeBasicCreate.userErrors)
-        );
+      handleGraphQLErrors(json);
+
+      const errors = json.data.discountCodeBasicCreate.userErrors;
+      if (errors.length) {
+        const msg = errors.map((e) => e.message).join(", ");
+
+        // Handle duplicate code
+        if (msg.toLowerCase().includes("already")) {
+          throw new Error(
+            "Discount already exists but discount_id metafield is missing"
+          );
+        }
+
+        throw new Error(msg);
       }
 
-      discountId = json.data.discountCodeBasicCreate.discountCodeBasic.id;
+      discountId =
+        json.data.discountCodeBasicCreate.discountCodeBasic.id;
     } else {
-      console.log("✏️ Updating existing discount");
+      console.log("✏️ Updating discount");
 
-      const updateRes = await admin.graphql(
+      const res = await admin.graphql(
         `
         mutation ($id: ID!, $input: DiscountCodeBasicInput!) {
           discountCodeBasicUpdate(id: $id, basicCodeDiscount: $input) {
-            userErrors { message }
+            userErrors { field message }
           }
         }
         `,
@@ -133,6 +145,8 @@ export async function action({ request }) {
           variables: {
             id: discountId,
             input: {
+              title: discountCode,
+              startsAt: new Date().toISOString(),
               customerGets: {
                 items: { all: true },
                 value: {
@@ -147,38 +161,28 @@ export async function action({ request }) {
         }
       );
 
-      const json = await updateRes.json();
+      const json = await res.json();
+      console.log("📦 UPDATE RESPONSE:", JSON.stringify(json, null, 2));
 
-      if (json.data.discountCodeBasicUpdate.userErrors.length) {
-        throw new Error(
-          JSON.stringify(json.data.discountCodeBasicUpdate.userErrors)
-        );
+      handleGraphQLErrors(json);
+
+      const errors = json.data.discountCodeBasicUpdate.userErrors;
+      if (errors.length) {
+        throw new Error(errors.map((e) => e.message).join(", "));
       }
     }
 
     /* ----------------------------------------------
-       UPDATE CUSTOMER METAFIELDS
+       UPDATE METAFIELDS
     ---------------------------------------------- */
     await updateCustomerMetafields(admin, shopifyCustomerId, [
-      {
-        key: "coins",
-        value: String(availablePoints),
-      },
-      {
-        key: "discount_code",
-        value: discountCode,
-      },
-      {
-        key: "discount_id",
-        value: discountId,
-      },
+      { key: "coins", value: String(availablePoints) },
+      { key: "discount_code", value: discountCode },
+      { key: "discount_id", value: discountId },
     ]);
 
     console.log("✅ Sync complete");
 
-    /* ----------------------------------------------
-       RESPONSE
-    ---------------------------------------------- */
     return Response.json({
       success: true,
       employeeID,
@@ -205,6 +209,13 @@ export async function action({ request }) {
    HELPERS
 ====================================================== */
 
+function handleGraphQLErrors(json) {
+  if (json.errors) {
+    console.error("❌ GraphQL Errors:", JSON.stringify(json.errors, null, 2));
+    throw new Error("GraphQL top-level error");
+  }
+}
+
 async function fetchAPI(endpoint, token) {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -222,7 +233,7 @@ async function getCustomerByEmail(admin, email) {
       customers(first: 1, query: $query) {
         nodes {
           id
-          metafields(first: 10) {
+          metafields(first: 20) {
             nodes { key value }
           }
         }
@@ -233,6 +244,8 @@ async function getCustomerByEmail(admin, email) {
   );
 
   const json = await res.json();
+  handleGraphQLErrors(json);
+
   return json.data.customers.nodes[0];
 }
 
@@ -270,7 +283,7 @@ function buildDiscountInput({ discountCode, shopifyCustomerId, coins }) {
 }
 
 async function updateCustomerMetafields(admin, customerId, metafields) {
-  await admin.graphql(
+  const res = await admin.graphql(
     `
     mutation ($input: CustomerInput!) {
       customerUpdate(input: $input) {
@@ -292,6 +305,9 @@ async function updateCustomerMetafields(admin, customerId, metafields) {
       },
     }
   );
+
+  const json = await res.json();
+  handleGraphQLErrors(json);
 }
 
 /* ======================================================
