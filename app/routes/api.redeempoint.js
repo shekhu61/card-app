@@ -40,10 +40,49 @@ export async function loader({ request }) {
 
     console.log("💲 Calculating discount value...");
 
-    const values = raw.split(".0").filter(v => v !== "");
-    console.log("Split discount values:", values);
+  const rawPoints = String(raw || "");
 
-    const discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
+let values = [];
+let discountAmount = 0;
+
+// ================= CASE 2: INTEGER FORMAT =================
+// Example: 6.06.020.032.032.0
+if (/\.0$/.test(rawPoints)) {
+
+  values = rawPoints
+    .split(".")
+    .filter(v => v !== "" && v !== "0")
+    .map(v => String(parseInt(v, 10)));
+
+}
+
+// ================= CASE 1: DECIMAL PACKED FORMAT =================
+// Example: 18.349.179.169.16
+else {
+
+  const digits = rawPoints.replace(/\./g, "");
+
+  // First value → xx.xx
+  const first = digits.slice(0, 4);
+  values.push(first.slice(0, 2) + "." + first.slice(2));
+
+  // Remaining → x.xx
+  let remaining = digits.slice(4);
+
+  for (let i = 0; i < remaining.length; i += 3) {
+    let part = remaining.slice(i, i + 3);
+    if (part.length === 3) {
+      values.push(part[0] + "." + part.slice(1));
+    }
+  }
+}
+
+console.log("Split discount values:", values);
+
+// Sum all values
+discountAmount = values.reduce((sum, v) => sum + parseFloat(v), 0);
+
+console.log("💲 Discount total:", discountAmount);
 
     console.log("💲 Discount total:", discountAmount);
 
