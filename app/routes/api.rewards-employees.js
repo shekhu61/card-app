@@ -120,7 +120,7 @@ async function shopifyGraphQL(query, variables = {}) {
 /* ========================================================
    SET CUSTOMER METAFIELDS (FORCE UPDATE)
 ======================================================== */
-async function setCustomerMetafields(customerId, employeeID, officeLocation) {
+async function setCustomerMetafields(customerId, employeeID, officeAddress) {
   const mutation = `
     mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
@@ -150,7 +150,7 @@ async function setCustomerMetafields(customerId, employeeID, officeLocation) {
       namespace: "custom",
       key: "office_location",
       type: "single_line_text_field",
-      value: officeLocation || "",
+      value: officeAddress || "",
     },
   ];
 
@@ -185,7 +185,7 @@ async function getCustomerByEmail(email) {
 /* ========================================================
    UPDATE CUSTOMER
 ======================================================== */
-async function updateCustomer(customerId, existingTags = [], employeeID, officeLocation) {
+async function updateCustomer(customerId, existingTags = [], employeeID, officeAddress) {
   const mutation = `
     mutation updateCustomer($input: CustomerInput!) {
       customerUpdate(input: $input) {
@@ -206,9 +206,9 @@ async function updateCustomer(customerId, existingTags = [], employeeID, officeL
   const result = await shopifyGraphQL(mutation, { input });
 
   // ✅ ALWAYS overwrite metafields
-  await setCustomerMetafields(customerId, employeeID, officeLocation);
+  await setCustomerMetafields(customerId, employeeID, officeAddress);
 
-  console.log(`📍 Updated office for customer ${customerId}: ${officeLocation}`);
+  console.log(`📍 Updated office for customer ${customerId}: ${officeAddress}`);
 
   return result;
 }
@@ -216,7 +216,7 @@ async function updateCustomer(customerId, existingTags = [], employeeID, officeL
 /* ========================================================
    CREATE CUSTOMER
 ======================================================== */
-async function createCustomer(firstName, lastName, email, employeeID, officeLocation) {
+async function createCustomer(firstName, lastName, email, employeeID, officeAddress) {
   const mutation = `
     mutation createCustomer($input: CustomerInput!) {
       customerCreate(input: $input) {
@@ -238,8 +238,8 @@ async function createCustomer(firstName, lastName, email, employeeID, officeLoca
   const customerId = result?.data?.customerCreate?.customer?.id;
 
   if (customerId) {
-    await setCustomerMetafields(customerId, employeeID, officeLocation);
-    console.log(`🆕 Created + set office for ${email}: ${officeLocation}`);
+    await setCustomerMetafields(customerId, employeeID, officeAddress);
+    console.log(`🆕 Created + set office for ${email}: ${officeAddress}`);
   }
 
   return result;
@@ -258,7 +258,7 @@ async function runEmployeeSync() {
   let failed = 0;
 
   for (const emp of employees) {
-    const { firstName, lastName, emailAddress, employeeID, officeLocation } = emp;
+    const { firstName, lastName, emailAddress, employeeID, officeAddress } = emp;
 
     if (!emailAddress) continue;
 
@@ -270,7 +270,7 @@ async function runEmployeeSync() {
           existingCustomer.id,
           existingCustomer.tags,
           employeeID,
-          officeLocation
+          officeAddress
         );
 
         const errors = result?.data?.customerUpdate?.userErrors;
@@ -285,7 +285,7 @@ async function runEmployeeSync() {
         lastName,
         emailAddress,
         employeeID,
-        officeLocation
+        officeAddress
       );
 
       const errors = result?.data?.customerCreate?.userErrors;
