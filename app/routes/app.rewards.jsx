@@ -73,6 +73,7 @@ export default function RewardsEmployees() {
     e.employeeNumber ?? "—",
     `${e.firstName ?? ""} ${e.lastName ?? ""}`,
     e.emailAddress ?? "—",
+    e.officeAddress ?? "—",
     e.position ?? "—",
     e.officeLocation ?? "—",
     badge(e.isActive),
@@ -173,12 +174,14 @@ export default function RewardsEmployees() {
                       "text",
                       "text",
                       "text",
+                      "text",
                     ]}
                     headings={[
                       "ID",
                       "Emp No",
                       "Name",
                       "Email",
+                      "office add",
                       "Position",
                       "Office",
                       "Status",
