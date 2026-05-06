@@ -185,11 +185,18 @@ async function getCustomerByEmail(email) {
 /* ========================================================
    UPDATE CUSTOMER
 ======================================================== */
-async function updateCustomer(customerId, existingTags = [], employeeID, officeAddress) {
+async function updateCustomer(
+  customerId,
+  existingTags = [],
+  employeeID,
+  officeAddress,
+  firstName,
+  lastName
+) {
   const mutation = `
     mutation updateCustomer($input: CustomerInput!) {
       customerUpdate(input: $input) {
-        customer { id email tags }
+        customer { id email firstName lastName tags }
         userErrors { field message }
       }
     }
@@ -200,15 +207,17 @@ async function updateCustomer(customerId, existingTags = [], employeeID, officeA
 
   const input = {
     id: customerId,
+    firstName: firstName || "",
+    lastName: lastName || "",
     tags: Array.from(tagsSet),
   };
 
   const result = await shopifyGraphQL(mutation, { input });
 
-  // ✅ ALWAYS overwrite metafields
+  // overwrite metafields
   await setCustomerMetafields(customerId, employeeID, officeAddress);
 
-  console.log(`📍 Updated office for customer ${customerId}: ${officeAddress}`);
+  console.log(`✏️ Updated customer ${customerId}: ${firstName} ${lastName}`);
 
   return result;
 }
@@ -267,11 +276,13 @@ async function runEmployeeSync() {
 
       if (existingCustomer) {
         const result = await updateCustomer(
-          existingCustomer.id,
-          existingCustomer.tags,
-          employeeID,
-          officeAddress
-        );
+  existingCustomer.id,
+  existingCustomer.tags,
+  employeeID,
+  officeAddress,
+  firstName,
+  lastName
+);
 
         const errors = result?.data?.customerUpdate?.userErrors;
         if (errors?.length) failed++;
